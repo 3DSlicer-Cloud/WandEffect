@@ -1,6 +1,6 @@
 
 #-----------------------------------------------------------------------------
-set(MODULE_NAME EditorEffectTemplate)
+set(MODULE_NAME TraceAndSelect)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS

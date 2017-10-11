@@ -1,5 +1,5 @@
 import os
-from __main__ import vtk, qt, ctk, slicer
+import vtk, qt, ctk, slicer
 import EditorLib
 from EditorLib.EditOptions import HelpButton
 from EditorLib.EditOptions import EditOptions
@@ -8,33 +8,33 @@ from EditorLib import LabelEffect
 
 #
 # The Editor Extension itself.
-# 
-# This needs to define the hooks to be come an editor effect.
+#
+# This needs to define the hooks to become an editor effect.
 #
 
 #
-# WandEffectOptions - see LabelEffect, EditOptions and Effect for superclasses
+# TraceAndSelectOptions - see LabelEffect, EditOptions and Effect for superclasses
 #
 
-class WandEffectOptions(EditorLib.LabelEffectOptions):
-  """ WandEffect-specfic gui
+class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
+  """ TraceAndSelect-specfic gui
   """
 
   def __init__(self, parent=0):
-    super(WandEffectOptions,self).__init__(parent)
+    super(TraceAndSelectOptions,self).__init__(parent)
 
     # self.attributes should be tuple of options:
     # 'MouseTool' - grabs the cursor
     # 'Nonmodal' - can be applied while another is active
     # 'Disabled' - not available
     self.attributes = ('MouseTool')
-    self.displayName = 'Wand Effect'
+    self.displayName = 'TraceAndSelect Effect'
 
   def __del__(self):
-    super(WandEffectOptions,self).__del__()
+    super(TraceAndSelectOptions,self).__del__()
 
   def create(self):
-    super(WandEffectOptions,self).create()
+    super(TraceAndSelectOptions,self).create()
 
     self.toleranceFrame = qt.QFrame(self.frame)
     self.toleranceFrame.setLayout(qt.QHBoxLayout())
@@ -84,7 +84,7 @@ class WandEffectOptions(EditorLib.LabelEffectOptions):
     self.frame.layout().addStretch(1)
 
   def destroy(self):
-    super(WandEffectOptions,self).destroy()
+    super(TraceAndSelectOptions,self).destroy()
 
   # note: this method needs to be implemented exactly as-is
   # in each leaf subclass so that "self" in the observer
@@ -98,7 +98,7 @@ class WandEffectOptions(EditorLib.LabelEffectOptions):
       self.parameterNodeTag = node.AddObserver("ModifiedEvent", self.updateGUIFromMRML)
 
   def setMRMLDefaults(self):
-    super(WandEffectOptions,self).setMRMLDefaults()
+    super(TraceAndSelectOptions,self).setMRMLDefaults()
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     defaults = (
@@ -106,7 +106,7 @@ class WandEffectOptions(EditorLib.LabelEffectOptions):
       ("maxPixels", "200"),
     )
     for d in defaults:
-      param = "WandEffect,"+d[0]
+      param = "TraceAndSelect,"+d[0]
       pvalue = self.parameterNode.GetParameter(param)
       if pvalue == '':
         self.parameterNode.SetParameter(param, d[1])
@@ -115,13 +115,13 @@ class WandEffectOptions(EditorLib.LabelEffectOptions):
   def updateGUIFromMRML(self,caller,event):
     params = ("tolerance", "maxPixels",)
     for p in params:
-      if self.parameterNode.GetParameter("WandEffect,"+p) == '':
+      if self.parameterNode.GetParameter("TraceAndSelect,"+p) == '':
         # don't update if the parameter node has not got all values yet
         return
-    super(WandEffectOptions,self).updateGUIFromMRML(caller,event)
+    super(TraceAndSelectOptions,self).updateGUIFromMRML(caller,event)
     self.disconnectWidgets()
-    self.toleranceSpinBox.setValue( float(self.parameterNode.GetParameter("WandEffect,tolerance")) )
-    self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("WandEffect,maxPixels")) )
+    self.toleranceSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,tolerance")) )
+    self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
     self.connectWidgets()
 
   def onToleranceSpinBoxChanged(self,value):
@@ -137,19 +137,19 @@ class WandEffectOptions(EditorLib.LabelEffectOptions):
   def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
-    super(WandEffectOptions,self).updateMRMLFromGUI()
-    self.parameterNode.SetParameter( "WandEffect,tolerance", str(self.toleranceSpinBox.value) )
-    self.parameterNode.SetParameter( "WandEffect,maxPixels", str(self.maxPixelsSpinBox.value) )
+    super(TraceAndSelectOptions,self).updateMRMLFromGUI()
+    self.parameterNode.SetParameter( "TraceAndSelect,tolerance", str(self.toleranceSpinBox.value) )
+    self.parameterNode.SetParameter( "TraceAndSelect,maxPixels", str(self.maxPixelsSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
     if not disableState:
       self.parameterNode.InvokePendingModifiedEvent()
 
 
 #
-# WandEffectTool
+# TraceAndSelectTool
 #
- 
-class WandEffectTool(LabelEffect.LabelEffectTool):
+
+class TraceAndSelectTool(LabelEffect.LabelEffectTool):
   """
   One instance of this will be created per-view when the effect
   is selected.  It is responsible for implementing feedback and
@@ -160,54 +160,82 @@ class WandEffectTool(LabelEffect.LabelEffectTool):
   """
 
   def __init__(self, sliceWidget):
-    super(WandEffectTool,self).__init__(sliceWidget)
+    super(TraceAndSelectTool,self).__init__(sliceWidget)
+    # create a logic instance to do the non-gui work
+    self.logic = TraceAndSelectLogic(self.sliceWidget.sliceLogic())
 
   def cleanup(self):
-    super(WandEffectTool,self).cleanup()
+    super(TraceAndSelectTool,self).cleanup()
 
   def processEvent(self, caller=None, event=None):
     """
     handle events from the render window interactor
     """
+
+    # let the superclass deal with the event if it wants to
+    if super(TraceAndSelectTool,self).processEvent(caller,event):
+      return
+
     if event == "LeftButtonPressEvent":
       xy = self.interactor.GetEventPosition()
       sliceLogic = self.sliceWidget.sliceLogic()
-      logic = WandEffectLogic(sliceLogic)
+      logic = TraceAndSelectLogic(sliceLogic)
       logic.undoRedo = self.undoRedo
       logic.apply(xy)
+      print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
       self.abortEvent(event)
     else:
       pass
 
+    # events from the slice node
+    if caller and caller.IsA('vtkMRMLSliceNode'):
+      # here you can respond to pan/zoom or other changes
+      # to the view
+      pass
+
 
 #
-# WandEffectLogic
+# TraceAndSelectLogic
 #
- 
-class WandEffectLogic(LabelEffect.LabelEffectLogic):
+
+class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
   """
   This class contains helper methods for a given effect
-  type.  It can be instanced as needed by an WandEffectTool
-  or WandEffectOptions instance in order to compute intermediate
-  results (say, for user feedback) or to implement the final 
+  type.  It can be instanced as needed by an TraceAndSelectTool
+  or TraceAndSelectOptions instance in order to compute intermediate
+  results (say, for user feedback) or to implement the final
   segmentation editing operation.  This class is split
-  from the WandEffectTool so that the operations can be used
+  from the TraceAndSelectTool so that the operations can be used
   by other code without the need for a view context.
   """
 
   def __init__(self,sliceLogic):
     self.sliceLogic = sliceLogic
-    self.fillMode = 'Plane' # can be Plane or Volume
+    self.fillMode = 'Plane'
 
   def apply(self,xy):
     #
     # get the parameters from MRML
     #
     node = EditUtil.EditUtil().getParameterNode()
-    tolerance = float(node.GetParameter("WandEffect,tolerance"))
-    maxPixels = float(node.GetParameter("WandEffect,maxPixels"))
+    print("@@@Tolerance:%s" % node.GetParameter("TraceAndSelect,tolerance"))
+    tolerance = float(node.GetParameter("TraceAndSelect,tolerance"))
+    print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
+    maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
+    print("@@@PaintOver:%s" % node.GetParameter("TraceAndSelect,paintOver"))
     paintOver = int(node.GetParameter("LabelEffect,paintOver"))
+    paintThreshold = 0 
+    thresholdMin = 25
+    thresholdMax = 25
     
+    #tolerance = float(node.GetParameter("TraceAndSelect,tolerance"))
+    #maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
+    #self.fillMode = node.GetParameter("TraceAndSelect,fillMode")
+    #paintOver = int(node.GetParameter("LabelEffect,paintOver"))
+    #paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
+    #thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
+    #thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
+
     #
     # get the label and background volume nodes
     #
@@ -223,9 +251,9 @@ class WandEffectLogic(LabelEffect.LabelEffectLogic):
     # (note: bg and lb will be the same for volumes created
     # by the editor, but can be different if the use selected
     # different bg nodes, but that is not handled here).
-    # 
-    xyToIJK = labelLogic.GetXYToIJKTransform().GetMatrix()
-    ijkFloat = xyToIJK.MultiplyPoint(xy+(0,1))[:3]
+    #
+    xyToIJK = labelLogic.GetXYToIJKTransform()
+    ijkFloat = xyToIJK.TransformDoublePoint(xy+(0,))
     ijk = []
     for element in ijkFloat:
       try:
@@ -239,7 +267,7 @@ class WandEffectLogic(LabelEffect.LabelEffectLogic):
     #
     # Get the numpy array for the bg and label
     #
-    import vtk.util.numpy_support
+    import vtk.util.numpy_support, numpy
     backgroundImage = backgroundNode.GetImageData()
     labelImage = labelNode.GetImageData()
     shape = list(backgroundImage.GetDimensions())
@@ -274,11 +302,21 @@ class WandEffectLogic(LabelEffect.LabelEffectLogic):
     self.undoRedo.saveState()
     value = backgroundDrawArray[ijk]
     label = EditUtil.EditUtil().getLabel()
-    lo = value - tolerance
-    hi = value + tolerance
+    if paintThreshold:
+      lo = thresholdMin
+      hi = thresholdMax
+    else:
+      lo = value - tolerance
+      hi = value + tolerance
     pixelsSet = 0
     toVisit = [ijk,]
-    visited = []    
+    # Create a map that contains the location of the pixels
+    # that have been already visited (added or considered to be added).
+    # This is required if paintOver is enabled because then we reconsider
+    # all pixels (not just the ones that have not labelled yet).
+    if paintOver:
+      labelDrawVisitedArray = numpy.zeros(labelDrawArray.shape,dtype='bool')
+
     while toVisit != []:
       location = toVisit.pop(0)
       try:
@@ -292,22 +330,18 @@ class WandEffectLogic(LabelEffect.LabelEffectLogic):
       if (paintOver and l == label):
         # label is the current one, but maybe it was filled with another high/low value,
         # so we have to visit it once (and only once) in this session, too
-        visitedCurrentLocation = True
-        try:
-          visited.index(location)
-        except ValueError:
-          # not found, so not visited yet
-          visitedCurrentLocation = False
-        if visitedCurrentLocation:        
+        if  labelDrawVisitedArray[location]:
+          # visited already, so don't try to fill it again
           continue
         else:
-          visited.append(location)
+          # we'll visit this pixel now, so mark it as visited
+          labelDrawVisitedArray[location] = True
       if b < lo or b > hi:
         continue
-      labelDrawArray[location] = label        
+      labelDrawArray[location] = label
       if l != label:
         # only count those pixels that were changed (to allow step-by-step growing by multiple mouse clicks)
-        pixelsSet += 1      
+        pixelsSet += 1
       if pixelsSet > maxPixels:
         toVisit = []
       else:
@@ -327,54 +361,54 @@ class WandEffectLogic(LabelEffect.LabelEffectLogic):
           toVisit.append((location[0]    , location[1]    , location[2] + 1))
 
     # signal to slicer that the label needs to be updated
-    labelImage.Modified()
-    labelNode.Modified()
+    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+
 
 #
-# The WandEffectExtension class definition 
+# The TraceAndSelect class definition
 #
 
-class WandEffectExtension(LabelEffect.LabelEffect):
+class TraceAndSelectExtension(LabelEffect.LabelEffect):
   """Organizes the Options, Tool, and Logic classes into a single instance
   that can be managed by the EditBox
   """
 
   def __init__(self):
-    # name is used to define the name of the icon image resource (e.g. WandEffect.png)
-    self.name = "WandEffect"
+    # name is used to define the name of the icon image resource (e.g. TraceAndSelect.png)
+    self.name = "TraceAndSelect"
     # tool tip is displayed on mouse hover
     self.toolTip = "Paint: circular paint brush for label map editing"
 
-    self.options = WandEffectOptions
-    self.tool = WandEffectTool
-    self.logic = WandEffectLogic
+    self.options = TraceAndSelectOptions
+    self.tool = TraceAndSelectTool
+    self.logic = TraceAndSelectLogic
 
 """ Test:
 
 sw = slicer.app.layoutManager().sliceWidget('Red')
 import EditorLib
-pet = EditorLib.WandEffectTool(sw)
+pet = EditorLib.TraceAndSelectTool(sw)
 
 """
 
 #
-# WandEffect
+# TraceAndSelect
 #
 
-class WandEffect:
+class TraceAndSelect:
   """
   This class is the 'hook' for slicer to detect and recognize the extension
   as a loadable scripted module
   """
   def __init__(self, parent):
-    parent.title = "Editor Wand Effect"
+    parent.title = "Editor TraceAndSelect Effect"
     parent.categories = ["Developer Tools.Editor Extensions"]
-    parent.contributors = ["Steve Pieper"]
+    parent.contributors = ["Steve Pieper (Isomics)"] # insert your name in the list
     parent.helpText = """
     Example of an editor extension.  No module interface here, only in the Editor module
     """
     parent.acknowledgementText = """
-    This editor extension was developed by 
+    This editor extension was developed by
     <Author>, <Institution>
     based on work by:
     Steve Pieper, Isomics, Inc.
@@ -394,23 +428,23 @@ class WandEffect:
       slicer.modules.editorExtensions
     except AttributeError:
       slicer.modules.editorExtensions = {}
-    slicer.modules.editorExtensions['WandEffect'] = WandEffectExtension
+    slicer.modules.editorExtensions['TraceAndSelect'] = TraceAndSelectExtension
 
 #
-# WandEffectWidget
+# TraceAndSelectWidget
 #
 
-class WandEffectWidget:
+class TraceAndSelectWidget:
   def __init__(self, parent = None):
     self.parent = parent
-    
+
   def setup(self):
     # don't display anything for this widget - it will be hidden anyway
     pass
 
   def enter(self):
     pass
-    
+
   def exit(self):
     pass
 
