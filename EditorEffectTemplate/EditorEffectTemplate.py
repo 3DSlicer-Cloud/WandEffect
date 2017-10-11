@@ -35,15 +35,50 @@ class EditorEffectTemplateOptions(EditorLib.LabelEffectOptions):
 
   def create(self):
     super(EditorEffectTemplateOptions,self).create()
-    self.apply = qt.QPushButton("Apply", self.frame)
-    self.apply.objectName = self.__class__.__name__ + 'Apply'
-    self.apply.setToolTip("Apply the extension operation")
-    self.frame.layout().addWidget(self.apply)
-    self.widgets.append(self.apply)
 
-    HelpButton(self.frame, "This is a sample with no real functionality.")
+    self.toleranceFrame = qt.QFrame(self.frame)
+    self.toleranceFrame.setLayout(qt.QHBoxLayout())
+    self.frame.layout().addWidget(self.toleranceFrame)
+    self.widgets.append(self.toleranceFrame)
+    self.toleranceLabel = qt.QLabel("Tolerance:", self.toleranceFrame)
+    self.toleranceLabel.setToolTip("Set the tolerance of the wand in terms of background pixel values")
+    self.toleranceFrame.layout().addWidget(self.toleranceLabel)
+    self.widgets.append(self.toleranceLabel)
+    self.toleranceSpinBox = qt.QDoubleSpinBox(self.toleranceFrame)
+    self.toleranceSpinBox.setToolTip("Set the tolerance of the wand in terms of background pixel values")
+    self.toleranceSpinBox.minimum = 0
+    self.toleranceSpinBox.maximum = 1000
+    self.toleranceSpinBox.suffix = ""
+    self.toleranceFrame.layout().addWidget(self.toleranceSpinBox)
+    self.widgets.append(self.toleranceSpinBox)
 
-    self.connections.append( (self.apply, 'clicked()', self.onApply) )
+    self.maxPixelsFrame = qt.QFrame(self.frame)
+    self.maxPixelsFrame.setLayout(qt.QHBoxLayout())
+    self.frame.layout().addWidget(self.maxPixelsFrame)
+    self.widgets.append(self.maxPixelsFrame)
+    self.maxPixelsLabel = qt.QLabel("Max Pixels per click:", self.maxPixelsFrame)
+    self.maxPixelsLabel.setToolTip("Set the maxPixels for each click")
+    self.maxPixelsFrame.layout().addWidget(self.maxPixelsLabel)
+    self.widgets.append(self.maxPixelsLabel)
+    self.maxPixelsSpinBox = qt.QDoubleSpinBox(self.maxPixelsFrame)
+    self.maxPixelsSpinBox.setToolTip("Set the maxPixels for each click")
+    self.maxPixelsSpinBox.minimum = 1
+    self.maxPixelsSpinBox.maximum = 100000
+    self.maxPixelsSpinBox.suffix = ""
+    self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
+    self.widgets.append(self.maxPixelsSpinBox)
+
+    HelpButton(self.frame, "Use this tool to label all voxels that are within a tolerance of where you click")
+
+    # don't connect the signals and slots directly - instead, add these
+    # to the list of connections so that gui callbacks can be cleanly 
+    # disabled while the gui is being updated.  This allows several gui
+    # elements to be interlinked with signal/slots but still get updated
+    # as a unit to the new value of the mrml node.
+    self.connections.append( 
+        (self.toleranceSpinBox, 'valueChanged(double)', self.onToleranceSpinBoxChanged) )
+    self.connections.append( 
+        (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
 
     # Add vertical spacer
     self.frame.layout().addStretch(1)
@@ -53,32 +88,58 @@ class EditorEffectTemplateOptions(EditorLib.LabelEffectOptions):
 
   # note: this method needs to be implemented exactly as-is
   # in each leaf subclass so that "self" in the observer
-  # is of the correct type
+  # is of the correct type 
   def updateParameterNode(self, caller, event):
     node = EditUtil.EditUtil().getParameterNode()
     if node != self.parameterNode:
       if self.parameterNode:
         node.RemoveObserver(self.parameterNodeTag)
       self.parameterNode = node
-      self.parameterNodeTag = node.AddObserver(vtk.vtkCommand.ModifiedEvent, self.updateGUIFromMRML)
+      self.parameterNodeTag = node.AddObserver("ModifiedEvent", self.updateGUIFromMRML)
 
   def setMRMLDefaults(self):
     super(EditorEffectTemplateOptions,self).setMRMLDefaults()
+    disableState = self.parameterNode.GetDisableModifiedEvent()
+    self.parameterNode.SetDisableModifiedEvent(1)
+    defaults = (
+      ("tolerance", "20"),
+      ("maxPixels", "200"),
+    )
+    for d in defaults:
+      param = "WandEffect,"+d[0]
+      pvalue = self.parameterNode.GetParameter(param)
+      if pvalue == '':
+        self.parameterNode.SetParameter(param, d[1])
+    self.parameterNode.SetDisableModifiedEvent(disableState)
 
   def updateGUIFromMRML(self,caller,event):
-    self.disconnectWidgets()
+    params = ("tolerance", "maxPixels",)
+    for p in params:
+      if self.parameterNode.GetParameter("WandEffect,"+p) == '':
+        # don't update if the parameter node has not got all values yet
+        return
     super(EditorEffectTemplateOptions,self).updateGUIFromMRML(caller,event)
+    self.disconnectWidgets()
+    self.toleranceSpinBox.setValue( float(self.parameterNode.GetParameter("WandEffect,tolerance")) )
+    self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("WandEffect,maxPixels")) )
     self.connectWidgets()
 
-  def onApply(self):
-    print('This is just an example - nothing here yet')
-
-  def updateMRMLFromGUI(self):
+  def onToleranceSpinBoxChanged(self,value):
     if self.updatingGUI:
       return
+    self.updateMRMLFromGUI()
+
+  def onMaxPixelsSpinBoxChanged(self,value):
+    if self.updatingGUI:
+      return
+    self.updateMRMLFromGUI()
+
+  def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     super(EditorEffectTemplateOptions,self).updateMRMLFromGUI()
+    self.parameterNode.SetParameter( "WandEffect,tolerance", str(self.toleranceSpinBox.value) )
+    self.parameterNode.SetParameter( "WandEffect,maxPixels", str(self.maxPixelsSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
     if not disableState:
       self.parameterNode.InvokePendingModifiedEvent()
@@ -157,7 +218,8 @@ class EditorEffectTemplateLogic(LabelEffect.LabelEffectLogic):
     # get the parameters from MRML
     #
     node = EditUtil.EditUtil().getParameterNode()
-    tolerance = 50
+    print("@@@Tolerance:%s" % node.GetParameter("WandEffect,tolerance"))
+    tolerance = float(node.GetParameter("WandEffect,tolerance"))
     maxPixels = 10000
     paintOver = 0
     paintThreshold = 0 
