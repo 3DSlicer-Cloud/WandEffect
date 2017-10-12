@@ -47,7 +47,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.toleranceSpinBox = qt.QDoubleSpinBox(self.toleranceFrame)
     self.toleranceSpinBox.setToolTip("Set the tolerance of the wand in terms of background pixel values")
     self.toleranceSpinBox.minimum = 0
-    self.toleranceSpinBox.maximum = 1000
+    self.toleranceSpinBox.maximum = 10000
     self.toleranceSpinBox.suffix = ""
     self.toleranceFrame.layout().addWidget(self.toleranceSpinBox)
     self.widgets.append(self.toleranceSpinBox)
@@ -79,6 +79,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
         (self.toleranceSpinBox, 'valueChanged(double)', self.onToleranceSpinBoxChanged) )
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
+    
 
     # Add vertical spacer
     self.frame.layout().addStretch(1)
@@ -104,6 +105,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     defaults = (
       ("tolerance", "500"),
       ("maxPixels", "1000"),
+      ("paintThreshold", "1"),
+      ("paintThresholdMin", "250"),
+      ("paintThresholdMax", "2799"),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
@@ -122,6 +126,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.disconnectWidgets()
     self.toleranceSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,tolerance")) )
     self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
+    self.toleranceFrame.setHidden( self.thresholdPaint.checked )
     self.connectWidgets()
 
   def onToleranceSpinBoxChanged(self,value):
@@ -223,10 +228,14 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
     maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
     print("@@@PaintOver:%s" % node.GetParameter("TraceAndSelect,paintOver"))
+    print("@@@Theshold:%s" % node.GetParameter("LabelEffect,paintThreshold"))
+    paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
+    print("@@@Theshold Min:%s" % node.GetParameter("LabelEffect,paintThresholdMin"))
+    thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
+    print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
+    thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
+
     paintOver = 0
-    paintThreshold = 0 
-    thresholdMin = 25
-    thresholdMax = 25
     
     #tolerance = float(node.GetParameter("TraceAndSelect,tolerance"))
     #maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
@@ -301,6 +310,12 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     self.undoRedo.saveState()
     value = backgroundDrawArray[ijk]
+    
+    print("@@@location=", ijk)
+    print("@@@value=", value)
+    if tolerance == 0:
+        return
+    
     label = EditUtil.EditUtil().getLabel()
     if paintThreshold:
       lo = thresholdMin
@@ -311,7 +326,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     pixelsSet = 0
     
     location = ijk
-    path = [ijk,]
     offsets = [
         (0, -1),
         (1, -1),
@@ -332,6 +346,30 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         "W",
         "NW"
     ]
+    # Find an edge pixel
+    path = []
+    toVisit = [ijk,]
+    while toVisit != []:
+        location = toVisit.pop(0)
+        labelDrawArray[location] = label
+        # Check 4-connected neighbors to see if location is an edge pixel
+        for i in range(0, 8, 2):
+            tmp = (location[0] + offsets[i][0], location[1] + offsets[i][1])
+            error = False
+            try:
+                b = backgroundDrawArray[tmp]
+            except IndexError:
+                error = True
+            if error or b < lo or b > hi:
+                # location is an edge, add to path
+                path.append(location)
+                toVisit = []
+                break
+            # tmp is within threshold, add to queue
+            toVisit.append(tmp)
+    labelDrawArray[path[0]] = label + 1
+    
+    """
     prev_offset = -1
     print("@@@location=", location)
     print("@@@value=", value)
@@ -371,7 +409,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # Color Path
     for point in path:
         labelDrawArray[point] = label
-    
+    """
     """
     # Check if original coordinate is in the enclosed path
     fill_point = ijk
