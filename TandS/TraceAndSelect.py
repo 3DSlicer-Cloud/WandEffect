@@ -102,8 +102,8 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     defaults = (
-      ("tolerance", "20"),
-      ("maxPixels", "200"),
+      ("tolerance", "500"),
+      ("maxPixels", "1000"),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
@@ -223,7 +223,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
     maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
     print("@@@PaintOver:%s" % node.GetParameter("TraceAndSelect,paintOver"))
-    paintOver = int(node.GetParameter("LabelEffect,paintOver"))
+    paintOver = 0
     paintThreshold = 0 
     thresholdMin = 25
     thresholdMax = 25
@@ -297,7 +297,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       labelDrawArray = labelArray
 
     #
-    # do a recursive search for pixels to change
+    # Build path
     #
     self.undoRedo.saveState()
     value = backgroundDrawArray[ijk]
@@ -309,7 +309,77 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       lo = value - tolerance
       hi = value + tolerance
     pixelsSet = 0
-    toVisit = [ijk,]
+    
+    location = ijk
+    path = [ijk,]
+    offsets = [
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+        (-1, 0),
+        (-1, -1)
+    ]
+    cardinals = [
+        "N",
+        "NE",
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW"
+    ]
+    prev_offset = -1
+    print("@@@location=", location)
+    print("@@@value=", value)
+    print("@@@lo=%d hi=%d" % (lo,hi))
+    complete = False
+    while not complete:
+        # Check neighbors in clockwise fashion from 12 o'clockwise
+        for i in range(0,8):
+            if i == (prev_offset + 4) % 8:
+                continue
+            offset = offsets[i]
+            temp = (location[0] + offset[0], location[1] + offset[1])
+            try:
+                b = backgroundDrawArray[temp]
+            except IndexError:
+                continue
+            print("@@@", temp, b, cardinals[i])
+            if b < lo or b > hi:
+                print("@@@Continuing")
+                continue
+            # temp is within threshold
+            if temp in path:
+                print("@@@In path, returning")
+                # temp is already visited, return simplified path
+                #path = path[path.index(temp):]
+                complete = True
+                break
+            else:
+                print("@@@New location, appending")
+                # New coordinate
+                path.append(temp)
+                location = temp
+                prev_offset = i
+                break
+    
+    print("@@@Length of path: ", len(path))
+    # Color Path
+    for point in path:
+        labelDrawArray[point] = label
+    
+    """
+    # Check if original coordinate is in the enclosed path
+    fill_point = ijk
+    if not is_inside_path(fill_point, path):
+        fill_point = get_point_inside_path(path)
+    
+    # Fill the path using a recursive search
+    toVisit = [fill_point,]
     # Create a map that contains the location of the pixels
     # that have been already visited (added or considered to be added).
     # This is required if paintOver is enabled because then we reconsider
@@ -336,14 +406,14 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         else:
           # we'll visit this pixel now, so mark it as visited
           labelDrawVisitedArray[location] = True
-      if b < lo or b > hi:
+      if location in path:
         continue
       labelDrawArray[location] = label
       if l != label:
         # only count those pixels that were changed (to allow step-by-step growing by multiple mouse clicks)
         pixelsSet += 1
-      if pixelsSet > maxPixels:
-        toVisit = []
+      #if pixelsSet > maxPixels:
+      #  toVisit = []
       else:
         if self.fillMode == 'Plane':
           # add the 4 neighbors to the stack
@@ -361,8 +431,32 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
           toVisit.append((location[0]    , location[1]    , location[2] + 1))
 
     # signal to slicer that the label needs to be updated
+    """
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
 
+
+def is_inside_path(location, path):
+    """Return true if location is inside path."""
+    # Check that location is not in path
+    if location in path:
+        return False
+    intersections = sum(x[0] == location[0] and x[1] < location[1] for x in path)
+    return intersections % 2
+
+
+def get_point_inside_path(path):
+    """Return a point inside the path."""
+    point = path[0]
+    offsets = [
+        (0,1),
+        (1,0),
+        (0,-1),
+        (-1,0)
+    ]
+    for offset in offsets:
+        tmp = (point[0] + offset[0], point[1] + offset[1])
+        if is_inside_path(tmp, path):
+            return tmp
 
 #
 # The TraceAndSelect class definition
@@ -409,7 +503,7 @@ class TraceAndSelect:
     """
     parent.acknowledgementText = """
     This editor extension was developed by
-    <Author>, <Institution>
+    stfried, pshultz, gieseker, mthol
     based on work by:
     Steve Pieper, Isomics, Inc.
     based on work by:
