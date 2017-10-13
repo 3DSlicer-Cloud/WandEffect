@@ -236,14 +236,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
 
     paintOver = 0
-    
-    #tolerance = float(node.GetParameter("TraceAndSelect,tolerance"))
-    #maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
-    #self.fillMode = node.GetParameter("TraceAndSelect,fillMode")
-    #paintOver = int(node.GetParameter("LabelEffect,paintOver"))
-    #paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
-    #thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
-    #thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
 
     #
     # get the label and background volume nodes
@@ -305,17 +297,16 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       backgroundDrawArray = backgroundArray
       labelDrawArray = labelArray
 
-    #
-    # Build path
-    #
-    self.undoRedo.saveState()
+
     value = backgroundDrawArray[ijk]
     
     print("@@@location=", ijk)
     print("@@@value=", value)
     if tolerance == 0:
+        # DEBUG purposes, testing coordinates etc.
         return
     
+    self.undoRedo.saveState()
     label = EditUtil.EditUtil().getLabel()
     if paintThreshold:
       lo = thresholdMin
@@ -327,89 +318,51 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     location = ijk
     offsets = [
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
         (0, 1),
-        (-1, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
         (-1, 0),
-        (-1, -1)
+        (-1, 1)
     ]
-    cardinals = [
-        "N",
-        "NE",
-        "E",
-        "SE",
-        "S",
-        "SW",
-        "W",
-        "NW"
-    ]
-    # Find an edge pixel
-    path = []
-    toVisit = [ijk,]
-    while toVisit != []:
-        location = toVisit.pop(0)
-        labelDrawArray[location] = label
-        # Check 4-connected neighbors to see if location is an edge pixel
+    #
+    # Find edge pixels
+    #
+    seeds = [None,None,None,None]
+    dist = 0
+    location = ijk
+    labelDrawArray[location] = label
+    while None in seeds:
+        dist += 1
         for i in range(0, 8, 2):
-            tmp = (location[0] + offsets[i][0], location[1] + offsets[i][1])
-            error = False
-            try:
-                b = backgroundDrawArray[tmp]
-            except IndexError:
-                error = True
-            if error or b < lo or b > hi:
-                # location is an edge, add to path
-                path.append(location)
-                toVisit = []
-                break
-            # tmp is within threshold, add to queue
-            toVisit.append(tmp)
-    labelDrawArray[path[0]] = label + 1
-    
-    """
-    prev_offset = -1
-    print("@@@location=", location)
-    print("@@@value=", value)
-    print("@@@lo=%d hi=%d" % (lo,hi))
-    complete = False
-    while not complete:
-        # Check neighbors in clockwise fashion from 12 o'clockwise
-        for i in range(0,8):
-            if i == (prev_offset + 4) % 8:
+            if seeds[i/2] is not None:
+                # Edge was already found in this direction
                 continue
-            offset = offsets[i]
-            temp = (location[0] + offset[0], location[1] + offset[1])
-            try:
-                b = backgroundDrawArray[temp]
-            except IndexError:
-                continue
-            print("@@@", temp, b, cardinals[i])
-            if b < lo or b > hi:
-                print("@@@Continuing")
-                continue
-            # temp is within threshold
-            if temp in path:
-                print("@@@In path, returning")
-                # temp is already visited, return simplified path
-                #path = path[path.index(temp):]
-                complete = True
+            tmp = (location[0] + dist * offsets[i][0], location[1] + dist * offsets[i][1])
+            labelDrawArray[tmp] = label + 1
+            # Check if edge
+            if is_edge(tmp, hi, lo, backgroundDrawArray):
+                labelDrawArray[tmp] = label + 2
+                seeds[i/2] = tmp
+
+
+    #
+    # Build path
+    #
+    print(seeds)
+    paths = []
+    for seed in seeds:
+        repeat = False
+        for path in paths:
+            if seed in path:
+                repeat = True
                 break
-            else:
-                print("@@@New location, appending")
-                # New coordinate
-                path.append(temp)
-                location = temp
-                prev_offset = i
-                break
-    
-    print("@@@Length of path: ", len(path))
-    # Color Path
-    for point in path:
-        labelDrawArray[point] = label
-    """
+        if repeat:
+            continue
+        paths.append(recursive_path_helper(seed, seed, seed, hi, lo, backgroundDrawArray, labelDrawArray, label + 2))
+        print(paths[-1])
     """
     # Check if original coordinate is in the enclosed path
     fill_point = ijk
@@ -470,8 +423,69 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
 
     # signal to slicer that the label needs to be updated
     """
-    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)  
 
+
+def recursive_path_helper(start, prev, location, hi, lo, bgArray, lArray, label):
+    """Recursively finds and builds a path that reaches start without revisiting previous pixels."""
+    # TODO: Implement a visited array, just in case an edge branches and re-converges with another.
+    # Will also want to implement tail recursion or a stack as necessary later on, if still
+    # hitting max recursion depth.
+    neighbors = []
+    offsets = [
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
+        (-1, 0),
+        (-1, 1)
+    ]
+    for offset in offsets:
+        neighbor = (location[0] + offset[0], location[1] + offset[1])
+        if neighbor != prev and is_edge(neighbor, hi, lo, bgArray):
+            neighbors.append(neighbor)
+    if start in neighbors:
+        return [location,]
+    if len(neighbors) == 0:
+        return None
+    for neighbor in neighbors:
+        lArray[neighbor] = label
+        tmp = recursive_path_helper(start, location, neighbor, hi, lo, bgArray, lArray, label)
+        if tmp is not None:
+            tmp.append(location)
+            return tmp
+    print("WHAT THE FUCK HAPPENED HERE")
+    return []
+
+
+def is_edge(location, hi, lo, bgArray):
+    """Return true is location is an edge pixel."""
+    offsets = [
+        (0,1),
+        (1,0),
+        (0,-1),
+        (-1,0)
+    ]
+    # Check that location is within threshold first
+    try:
+        b = bgArray[location]
+    except IndexError:
+        return False
+    if b < lo or b > hi:
+        return False
+    
+    # Check if its neighbors are outside the threshold
+    for offset in offsets:
+        tmp = (location[0] + offset[0], location[1] + offset[1])
+        try:
+            b = bgArray[tmp]
+        except IndexError:
+            return True
+        if b < lo or b > hi:
+            return True
+    return False
 
 def is_inside_path(location, path):
     """Return true if location is inside path."""
@@ -580,4 +594,4 @@ class TraceAndSelectWidget:
   def exit(self):
     pass
 
-
+# Steven wuz here
