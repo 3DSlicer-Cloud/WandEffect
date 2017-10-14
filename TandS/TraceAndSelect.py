@@ -106,7 +106,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       ("tolerance", "500"),
       ("maxPixels", "1000"),
       ("paintThreshold", "1"),
-      ("paintThresholdMin", "250"),
+      ("paintThresholdMin", "150"),
       ("paintThresholdMax", "2799"),
     )
     for d in defaults:
@@ -235,7 +235,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
     thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
 
-    paintOver = 0
+    paintOver = 1
 
     #
     # get the label and background volume nodes
@@ -333,25 +333,24 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     seeds = [None,None,None,None]
     dist = 0
     location = ijk
-    labelDrawArray[location] = label
+    # labelDrawArray[location] = label
     while None in seeds:
-        dist += 1
         for i in range(0, 8, 2):
             if seeds[i/2] is not None:
                 # Edge was already found in this direction
                 continue
             tmp = (location[0] + dist * offsets[i][0], location[1] + dist * offsets[i][1])
-            labelDrawArray[tmp] = label + 1
+            # labelDrawArray[tmp] = label + 1
             # Check if edge
             if is_edge(tmp, hi, lo, backgroundDrawArray):
                 labelDrawArray[tmp] = label + 2
                 seeds[i/2] = tmp
-
+        dist += 1
 
     #
     # Build path
     #
-    print(seeds)
+    print("@@@BUILDING PATH")
     paths = []
     for seed in seeds:
         repeat = False
@@ -361,13 +360,30 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
                 break
         if repeat:
             continue
-        paths.append(recursive_path_helper(seed, seed, seed, hi, lo, backgroundDrawArray, labelDrawArray, label + 2))
-        print(paths[-1])
-    """
-    # Check if original coordinate is in the enclosed path
+        ret_val = build_path(seed, hi, lo, backgroundDrawArray)
+        paths.append(ret_val[0])
+        visited = ret_val[1]
+        for pixel in visited:
+            labelDrawArray[pixel] = label
+        # paths.append(recursive_path_helper(seed, seed, seed, hi, lo, backgroundDrawArray, labelDrawArray, label + 2))
+    best_path = []
+    for path in paths:
+        if len(path) > len(best_path):
+            best_path = path
+    
+    # signal to slicer that the label needs to be updated
+    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+    print(best_path)
+    
+    #
+    # Fill path
+    #
     fill_point = ijk
-    if not is_inside_path(fill_point, path):
-        fill_point = get_point_inside_path(path)
+    print("@@@fill_point:", fill_point)
+    if not is_inside_path(fill_point, best_path):
+        fill_point = get_point_inside_path(best_path)
+    print("@@@fill_point:", fill_point)
+
     
     # Fill the path using a recursive search
     toVisit = [fill_point,]
@@ -378,6 +394,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     if paintOver:
       labelDrawVisitedArray = numpy.zeros(labelDrawArray.shape,dtype='bool')
 
+    print("@@@FILLING PATH")
     while toVisit != []:
       location = toVisit.pop(0)
       try:
@@ -388,42 +405,41 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       if (not paintOver and l != 0):
         # label filled already and not painting over, leave it alone
         continue
-      if (paintOver and l == label):
-        # label is the current one, but maybe it was filled with another high/low value,
-        # so we have to visit it once (and only once) in this session, too
-        if  labelDrawVisitedArray[location]:
-          # visited already, so don't try to fill it again
-          continue
-        else:
-          # we'll visit this pixel now, so mark it as visited
-          labelDrawVisitedArray[location] = True
-      if location in path:
+      try:
+        if (paintOver and l == label):
+          # label is the current one, but maybe it was filled with another high/low value,
+          # so we have to visit it once (and only once) in this session, too
+          if  labelDrawVisitedArray[location]:
+            # visited already, so don't try to fill it again
+            continue
+          else:
+            # we'll visit this pixel now, so mark it as visited
+            labelDrawVisitedArray[location] = True
+      except ValueError:
+        print("@@@VALUE ERROR!", l)
+        print("@@@Location: ", location)
+        print("@@@fill_point:", fill_point)
+        print("@@@toVisit:", toVisit)
+        continue
+      if location in best_path:
         continue
       labelDrawArray[location] = label
       if l != label:
         # only count those pixels that were changed (to allow step-by-step growing by multiple mouse clicks)
         pixelsSet += 1
-      #if pixelsSet > maxPixels:
-      #  toVisit = []
+      if pixelsSet > maxPixels:
+        toVisit = []
       else:
-        if self.fillMode == 'Plane':
           # add the 4 neighbors to the stack
           toVisit.append((location[0] - 1, location[1]     ))
           toVisit.append((location[0] + 1, location[1]     ))
           toVisit.append((location[0]    , location[1] - 1 ))
           toVisit.append((location[0]    , location[1] + 1 ))
-        elif self.fillMode == 'Volume':
-          # add the 6 neighbors to the stack
-          toVisit.append((location[0] - 1, location[1]    , location[2]    ))
-          toVisit.append((location[0] + 1, location[1]    , location[2]    ))
-          toVisit.append((location[0]    , location[1] - 1, location[2]    ))
-          toVisit.append((location[0]    , location[1] + 1, location[2]    ))
-          toVisit.append((location[0]    , location[1]    , location[2] - 1))
-          toVisit.append((location[0]    , location[1]    , location[2] + 1))
 
     # signal to slicer that the label needs to be updated
-    """
-    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)  
+    print("@@@FILL DONE")
+    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+    return
 
 
 def recursive_path_helper(start, prev, location, hi, lo, bgArray, lArray, label):
@@ -460,6 +476,45 @@ def recursive_path_helper(start, prev, location, hi, lo, bgArray, lArray, label)
     return []
 
 
+def build_path(start, hi, lo, bgArray):
+    """Return a complete path from start."""
+    offsets = [
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
+        (-1, 0),
+        (-1, 1)
+    ]
+    visited = [start,]
+    path = [start,]
+    location = start
+    while path != []:
+        found = False
+        for offset in offsets:
+            neighbor = (location[0] + offset[0], location[1] + offset[1])
+            if len(visited) > 1 and neighbor == start:
+                # lArray[neighbor] = label
+                return (path, visited)
+            if is_edge(neighbor, hi, lo, bgArray) and neighbor not in visited:
+                # lArray[neighbor] = label
+                visited.append(neighbor)
+                path.append(neighbor)
+                location = neighbor
+                found = True
+                break
+        if not found:
+            # Dead end found, re-trace steps
+            print("@@@DEAD END!")
+            path.pop()
+            if len(path) > 0:
+                location = path[len(path)-1]
+    print("@@@Edge is not part of the path? What the?")
+    return ([],[])
+
+
 def is_edge(location, hi, lo, bgArray):
     """Return true is location is an edge pixel."""
     offsets = [
@@ -487,6 +542,7 @@ def is_edge(location, hi, lo, bgArray):
             return True
     return False
 
+
 def is_inside_path(location, path):
     """Return true if location is inside path."""
     # Check that location is not in path
@@ -509,7 +565,8 @@ def get_point_inside_path(path):
         tmp = (point[0] + offset[0], point[1] + offset[1])
         if is_inside_path(tmp, path):
             return tmp
-
+    print("@@@There are no adjacent points inside the path???")
+    return None
 #
 # The TraceAndSelect class definition
 #
