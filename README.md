@@ -1,6 +1,6 @@
-This is the extension our team has made to increase the speed a model can be created.
+This is a [3DSlicer](https://www.slicer.org/) extension made for the prosthetic design process. Using it will decrease the time needed to mark bones and nerves in CT scans, allowing patients to get prosthetics faster.
 
-To use the extension, do the following:
+To prepare your machine for testing, do the following:
 
 1. Install the **nightly** build of 3DSlicer for your operating system, found [here](http://download.slicer.org/).
 2. Download DICOM files, found [here](https://drive.google.com/a/umich.edu/file/d/0BxZryoBEmXPeS2UyUlZYSnlrQUU/view?usp=sharing).
