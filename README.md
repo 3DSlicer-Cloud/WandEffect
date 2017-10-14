@@ -1,3 +1,5 @@
+# Wand Effect
+
 This is a [3DSlicer](https://www.slicer.org/) extension made for the prosthetic design process. Using it will decrease the time needed to mark bones and nerves in CT scans, allowing patients to get prosthetics faster.
 
 To prepare your machine for testing, do the following:
