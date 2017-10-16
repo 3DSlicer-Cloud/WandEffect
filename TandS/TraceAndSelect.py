@@ -36,22 +36,6 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
   def create(self):
     super(TraceAndSelectOptions,self).create()
 
-    self.toleranceFrame = qt.QFrame(self.frame)
-    self.toleranceFrame.setLayout(qt.QHBoxLayout())
-    self.frame.layout().addWidget(self.toleranceFrame)
-    self.widgets.append(self.toleranceFrame)
-    self.toleranceLabel = qt.QLabel("Tolerance:", self.toleranceFrame)
-    self.toleranceLabel.setToolTip("Set the tolerance of the wand in terms of background pixel values")
-    self.toleranceFrame.layout().addWidget(self.toleranceLabel)
-    self.widgets.append(self.toleranceLabel)
-    self.toleranceSpinBox = qt.QDoubleSpinBox(self.toleranceFrame)
-    self.toleranceSpinBox.setToolTip("Set the tolerance of the wand in terms of background pixel values")
-    self.toleranceSpinBox.minimum = 0
-    self.toleranceSpinBox.maximum = 10000
-    self.toleranceSpinBox.suffix = ""
-    self.toleranceFrame.layout().addWidget(self.toleranceSpinBox)
-    self.widgets.append(self.toleranceSpinBox)
-
     self.maxPixelsFrame = qt.QFrame(self.frame)
     self.maxPixelsFrame.setLayout(qt.QHBoxLayout())
     self.frame.layout().addWidget(self.maxPixelsFrame)
@@ -68,15 +52,15 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
     self.widgets.append(self.maxPixelsSpinBox)
 
-    HelpButton(self.frame, "Use this tool to label all voxels that are within a tolerance of where you click")
+    HelpButton(self.frame, "Use this tool to help you label all voxels enclosed in an area bounded by the the largest path of pixels within the specified threshold.")
 
     # don't connect the signals and slots directly - instead, add these
     # to the list of connections so that gui callbacks can be cleanly 
     # disabled while the gui is being updated.  This allows several gui
     # elements to be interlinked with signal/slots but still get updated
     # as a unit to the new value of the mrml node.
-    self.connections.append( 
-        (self.toleranceSpinBox, 'valueChanged(double)', self.onToleranceSpinBoxChanged) )
+    self.thresholdPaint.hide()
+    self.paintOver.hide()
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
     
@@ -99,34 +83,39 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       self.parameterNodeTag = node.AddObserver("ModifiedEvent", self.updateGUIFromMRML)
 
   def setMRMLDefaults(self):
-    super(TraceAndSelectOptions,self).setMRMLDefaults()
+    #super(TraceAndSelectOptions,self).setMRMLDefaults()
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     defaults = (
-      ("tolerance", "500"),
-      ("maxPixels", "1000"),
-      ("paintThreshold", "1"),
-      ("paintThresholdMin", "150"),
-      ("paintThresholdMax", "2799"),
+      ("maxPixels", "2500"),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
       pvalue = self.parameterNode.GetParameter(param)
       if pvalue == '':
         self.parameterNode.SetParameter(param, d[1])
+    defaults = (
+      ("paintOver", "1"),
+      ("paintThreshold", "1"),
+      ("paintThresholdMin", "250"),
+      ("paintThresholdMax", "2799"),
+    )
+    for d in defaults:
+      param = "LabelEffect,"+d[0]
+      pvalue = self.parameterNode.GetParameter(param)
+      if pvalue == '':
+        self.parameterNode.SetParameter(param, d[1])
     self.parameterNode.SetDisableModifiedEvent(disableState)
 
   def updateGUIFromMRML(self,caller,event):
-    params = ("tolerance", "maxPixels",)
+    params = ("maxPixels",)
     for p in params:
       if self.parameterNode.GetParameter("TraceAndSelect,"+p) == '':
         # don't update if the parameter node has not got all values yet
         return
     super(TraceAndSelectOptions,self).updateGUIFromMRML(caller,event)
     self.disconnectWidgets()
-    self.toleranceSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,tolerance")) )
     self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
-    self.toleranceFrame.setHidden( self.thresholdPaint.checked )
     self.connectWidgets()
 
   def onToleranceSpinBoxChanged(self,value):
@@ -143,7 +132,6 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     super(TraceAndSelectOptions,self).updateMRMLFromGUI()
-    self.parameterNode.SetParameter( "TraceAndSelect,tolerance", str(self.toleranceSpinBox.value) )
     self.parameterNode.SetParameter( "TraceAndSelect,maxPixels", str(self.maxPixelsSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
     if not disableState:
@@ -223,8 +211,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # get the parameters from MRML
     #
     node = EditUtil.EditUtil().getParameterNode()
-    print("@@@Tolerance:%s" % node.GetParameter("TraceAndSelect,tolerance"))
-    tolerance = float(node.GetParameter("TraceAndSelect,tolerance"))
     print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
     maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
     print("@@@PaintOver:%s" % node.GetParameter("TraceAndSelect,paintOver"))
@@ -302,18 +288,11 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     print("@@@location=", ijk)
     print("@@@value=", value)
-    if tolerance == 0:
-        # DEBUG purposes, testing coordinates etc.
-        return
     
     self.undoRedo.saveState()
     label = EditUtil.EditUtil().getLabel()
-    if paintThreshold:
-      lo = thresholdMin
-      hi = thresholdMax
-    else:
-      lo = value - tolerance
-      hi = value + tolerance
+    lo = thresholdMin
+    hi = thresholdMax
     pixelsSet = 0
     
     location = ijk
@@ -374,15 +353,20 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # signal to slicer that the label needs to be updated
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
     print(best_path)
+    if len(best_path) < 5:
+        # Something went wrong
+        print("@@@Path was unexpectedly short. Undoing.")
+        self.undoRedo.undo()
+        return
     
     #
     # Fill path
     #
     fill_point = ijk
-    print("@@@fill_point:", fill_point)
     if not is_inside_path(fill_point, best_path):
+        print("@@@Fill point moved from: ", fill_point)
         fill_point = get_point_inside_path(best_path)
-    print("@@@fill_point:", fill_point)
+        print("@@@to: ", fill_point)
 
     
     # Fill the path using a recursive search
@@ -440,40 +424,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@FILL DONE")
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
     return
-
-
-def recursive_path_helper(start, prev, location, hi, lo, bgArray, lArray, label):
-    """Recursively finds and builds a path that reaches start without revisiting previous pixels."""
-    # TODO: Implement a visited array, just in case an edge branches and re-converges with another.
-    # Will also want to implement tail recursion or a stack as necessary later on, if still
-    # hitting max recursion depth.
-    neighbors = []
-    offsets = [
-        (0, 1),
-        (1, 1),
-        (1, 0),
-        (1, -1),
-        (0, -1),
-        (-1, -1),
-        (-1, 0),
-        (-1, 1)
-    ]
-    for offset in offsets:
-        neighbor = (location[0] + offset[0], location[1] + offset[1])
-        if neighbor != prev and is_edge(neighbor, hi, lo, bgArray):
-            neighbors.append(neighbor)
-    if start in neighbors:
-        return [location,]
-    if len(neighbors) == 0:
-        return None
-    for neighbor in neighbors:
-        lArray[neighbor] = label
-        tmp = recursive_path_helper(start, location, neighbor, hi, lo, bgArray, lArray, label)
-        if tmp is not None:
-            tmp.append(location)
-            return tmp
-    print("WHAT THE FUCK HAPPENED HERE")
-    return []
 
 
 def build_path(start, hi, lo, bgArray):
@@ -548,8 +498,29 @@ def is_inside_path(location, path):
     # Check that location is not in path
     if location in path:
         return False
+    # Check the number of edge points between the point and each edge of the DICOM
+    # Multiple checks necessary to avoid edge cases where an edge of the path may be parallel to an axis
+    # Ex:
+    """
+     #######
+    #      #
+    ##  P  #
+      #####
+    """
+    # If the number of intersections from negative x-axis were counted, P would be considered outside the path.
     intersections = sum(x[0] == location[0] and x[1] < location[1] for x in path)
-    return intersections % 2
+    if (intersections % 2) == 1:
+        return True
+    intersections = sum(x[0] == location[0] and x[1] > location[1] for x in path)
+    if (intersections % 2) == 1:
+        return True
+    intersections = sum(x[1] == location[1] and x[0] < location[0] for x in path)
+    if (intersections % 2) == 1:
+        return True
+    intersections = sum(x[1] == location[1] and x[0] > location[0] for x in path)
+    if (intersections % 2) == 1:
+        return True
+    return False
 
 
 def get_point_inside_path(path):
@@ -606,7 +577,7 @@ class TraceAndSelect:
   def __init__(self, parent):
     parent.title = "Editor TraceAndSelect Effect"
     parent.categories = ["Developer Tools.Editor Extensions"]
-    parent.contributors = ["Steve Pieper (Isomics)"] # insert your name in the list
+    parent.contributors = ["Steven Friedland, Peter Shultz, Nathan Gieseker, Matthew Holbrook"] # insert your name in the list
     parent.helpText = """
     Example of an editor extension.  No module interface here, only in the Editor module
     """
