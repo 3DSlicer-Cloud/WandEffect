@@ -325,13 +325,16 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
                 labelDrawArray[tmp] = label + 2
                 seeds[i/2] = tmp
         dist += 1
-
+        if dist > 200:
+            break
     #
     # Build path
     #
     print("@@@BUILDING PATH")
     paths = []
     for seed in seeds:
+        if seed is None:
+            continue
         repeat = False
         for path in paths:
             if seed in path:
@@ -503,11 +506,15 @@ def is_inside_path(location, path):
     # Ex:
     """
      #######
-    #      #
-    ##  P  #
-      #####
+    #      #E
+    ##  P   #
+      ######
     """
     # If the number of intersections from negative x-axis were counted, P would be considered outside the path.
+    # TODO:
+    # EDGE CASE: E IS CONSIDERED INSIDE THE SHAPE
+    # Modify so that the function checks all 4 axes, and only proceeds if the number of intersections is correct for ALL of them.
+    # Will have to make it so it doesn't simply sum intersection points, but will have to ignore series of contiguous points and count them as a single intersection.
     intersections = sum(x[0] == location[0] and x[1] < location[1] for x in path)
     if (intersections % 2) == 1:
         return True
