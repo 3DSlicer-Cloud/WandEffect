@@ -210,17 +210,27 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     # get the parameters from MRML
     #
+    # TODO: ADD SOME KIND OF ERROR MESSAGE INTERFACE TO GUI TO PRINT THINGS LIKE UNEXPECTED SHORT PATH
     node = EditUtil.EditUtil().getParameterNode()
+    
+    # Max number of pixels to fill in (does not include path)
     print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
     maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
-    print("@@@PaintOver:%s" % node.GetParameter("TraceAndSelect,paintOver"))
+    
+    # Whether or not threshold is enabled (should always be 1, since the option to disable was removed from GUI)
     print("@@@Theshold:%s" % node.GetParameter("LabelEffect,paintThreshold"))
     paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
+    
+    # Minimum intensity value to be detected
     print("@@@Theshold Min:%s" % node.GetParameter("LabelEffect,paintThresholdMin"))
     thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
+    
+    # Maximum intensity value to be detected
     print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
     thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
-
+    
+    # For sanity purposes, tool can always "paint" over existing labels. If we find some foreseeable reason why we might
+    # not want this in all cases, we can re-add to the GUI.
     paintOver = 1
 
     #
@@ -262,6 +272,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     backgroundArray = vtk.util.numpy_support.vtk_to_numpy(backgroundImage.GetPointData().GetScalars()).reshape(shape)
     labelArray = vtk.util.numpy_support.vtk_to_numpy(labelImage.GetPointData().GetScalars()).reshape(shape)
 
+    # THIS SHOULD ALWAYS BE TRUE
+    # VOLUME MODE IS DISABLED BECAUSE I HAVE NO CLUE WHAT IT IS
     if self.fillMode == 'Plane':
       # select the plane corresponding to current slice orientation
       # for the input volume
@@ -279,21 +291,33 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         backgroundDrawArray = backgroundArray[i,:,:]
         labelDrawArray = labelArray[i,:,:]
         ijk = (j, k)
-    elif self.fillMode == 'Volume':
-      backgroundDrawArray = backgroundArray
-      labelDrawArray = labelArray
+    else:
+        print("HOW DID YOU DO THAT??? WHAT DID YOU DO TO ACTIVATE VOLUME MODE???")
+        return
 
 
+    # Log info about where the user clicked for debugging purposes
     value = backgroundDrawArray[ijk]
-    
     print("@@@location=", ijk)
     print("@@@value=", value)
     
+    # Save state before doing anything
     self.undoRedo.saveState()
+    # Get the current label that the user wishes to assign using the tool
     label = EditUtil.EditUtil().getLabel()
+    
+    # Use lo and hi for threshold checks
+    # Easiest way to do things is check if a pixel is outside the threshold, ie.
+    """
+    try:
+        b = backgroundDrawArray[(x,y)]
+    except IndexError:
+        NOT IN THRESHOLD (coordinates exceed bounds of array)
+    if b < lo or b > hi:
+       NOT IN THRESHOLD (intensity is too high or low)
+    """
     lo = thresholdMin
     hi = thresholdMax
-    pixelsSet = 0
     
     location = ijk
     offsets = [
@@ -309,24 +333,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     # Find edge pixels
     #
-    seeds = [None,None,None,None]
-    dist = 0
-    location = ijk
-    # labelDrawArray[location] = label
-    while None in seeds:
-        for i in range(0, 8, 2):
-            if seeds[i/2] is not None:
-                # Edge was already found in this direction
-                continue
-            tmp = (location[0] + dist * offsets[i][0], location[1] + dist * offsets[i][1])
-            # labelDrawArray[tmp] = label + 1
-            # Check if edge
-            if is_edge(tmp, hi, lo, backgroundDrawArray):
-                labelDrawArray[tmp] = label + 2
-                seeds[i/2] = tmp
-        dist += 1
-        if dist > 200:
-            break
+    seeds = find_edges(location, 200, hi, lo, backgroundDrawArray)
+    
     #
     # Build path
     #
@@ -347,19 +355,33 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         visited = ret_val[1]
         for pixel in visited:
             labelDrawArray[pixel] = label
-        # paths.append(recursive_path_helper(seed, seed, seed, hi, lo, backgroundDrawArray, labelDrawArray, label + 2))
     best_path = []
+    # TODO: FIX BEST LENGTH ALG
+    # Current implementation works off assumption that longest path is the largest
+    # have already run into cases where this simply isn't true, and results in the wrong
+    # path being filled.
+    # Best solution would be to fix the is_inside_path alg to be more accurate, and simply
+    # trim paths during the build path section by checking if any seed points are already contained
+    # within previous path(s).
     for path in paths:
         if len(path) > len(best_path):
             best_path = path
     
     # signal to slicer that the label needs to be updated
+    # This isn't entirely necessary, but we do this here because the path has been labeled,
+    # but if the path doesn't meet size requirements, we may return here
+    # it's important to note that any work done without signaling an update is still saved,
+    # BUT, it is not displayed until the next update
+    # I don't know how costly an update is, however, for automation purposes down the line,
+    # it may be to our benefit to update only once the automation across all slices is complete, rather
+    # than once per slice.
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
     print(best_path)
     if len(best_path) < 5:
         # Something went wrong
         print("@@@Path was unexpectedly short. Undoing.")
         self.undoRedo.undo()
+        self.undoRedo.clearRedoStack()
         return
     
     #
@@ -381,6 +403,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     if paintOver:
       labelDrawVisitedArray = numpy.zeros(labelDrawArray.shape,dtype='bool')
 
+    pixelsSet = 0
     print("@@@FILLING PATH")
     while toVisit != []:
       location = toVisit.pop(0)
@@ -428,6 +451,38 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
     return
 
+def find_edge(point, offset, max_dist, hi, lo, bgArray):
+    """Return the first edgepoint and its distance from point using offset.
+    None if no path found.
+    """
+    for i in range(1, max_dist):
+        next = (point[0] + i * offset[0], point[1] + i * offset[1])
+        if is_edge(next, hi, lo, bgArray):
+            return (next, i)
+    return None
+
+def find_edges(starting_point, max_dist, hi, lo, bgArray):
+    """Return an array of edge points found growing outward from starting_point.
+    Search does not exceed max_dist.
+    If starting_point is within threshold, find a maximum of 4 points, one for each offset.
+    If starting_point is NOT within threshold, try to find as many as 8 points; two for each offset.
+    """
+    try:
+        b = bgArray[starting_point]
+    except IndexError:
+        return None
+    offsets = [(0,1), (1,0), (0,-1), (-1,0)]
+    edgePoints = []
+    for offset in offsets:
+        first_result = find_edge(starting_point, offset, max_dist, hi, lo, bgArray)
+        if first_result is not None:
+            edgePoints.append(first_result[0])
+            if b < lo or b > hi:
+                # Try to find second point, since starting click was outside threshold
+                second_result = find_edge(first_result[0], offset, first_result[1], hi, lo, bgArray)
+                if second_result is not None:
+                    edgePoints.append(second_result[0])
+    return edgePoints
 
 def build_path(start, hi, lo, bgArray):
     """Return a complete path from start."""
