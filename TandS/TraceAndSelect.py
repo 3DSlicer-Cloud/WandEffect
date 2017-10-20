@@ -351,11 +351,14 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         if repeat:
             continue
         ret_val = build_path(seed, hi, lo, backgroundDrawArray)
+        if ret_val[0] == []:
+            continue
         paths.append(ret_val[0])
         visited = ret_val[1]
         for pixel in visited:
             labelDrawArray[pixel] = label
     best_path = []
+    x_max = -1
     # TODO: FIX BEST LENGTH ALG
     # Current implementation works off assumption that longest path is the largest
     # have already run into cases where this simply isn't true, and results in the wrong
@@ -364,8 +367,12 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # trim paths during the build path section by checking if any seed points are already contained
     # within previous path(s).
     for path in paths:
-        if len(path) > len(best_path):
+        path_x = get_max_x(path)
+        if path_x > x_max:
+            x_max = path_x
             best_path = path
+        # if len(path) > len(best_path):
+        #     best_path = path
     
     # signal to slicer that the label needs to be updated
     # This isn't entirely necessary, but we do this here because the path has been labeled,
@@ -388,11 +395,12 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # Fill path
     #
     fill_point = ijk
+    """
     if not is_inside_path(fill_point, best_path):
         print("@@@Fill point moved from: ", fill_point)
         fill_point = get_point_inside_path(best_path)
         print("@@@to: ", fill_point)
-
+    """
     
     # Fill the path using a recursive search
     toVisit = [fill_point,]
@@ -600,6 +608,11 @@ def get_point_inside_path(path):
             return tmp
     print("@@@There are no adjacent points inside the path???")
     return None
+	
+def get_max_x(list):
+    """Returns the max x of a list of coordinate tuples."""
+    return max(list,key=lambda item:item[0])[0]
+
 #
 # The TraceAndSelect class definition
 #
