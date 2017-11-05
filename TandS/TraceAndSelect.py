@@ -255,6 +255,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # get the parameters from MRML
     #
     # TODO: ADD SOME KIND OF ERROR MESSAGE INTERFACE TO GUI TO PRINT THINGS LIKE UNEXPECTED SHORT PATH
+    # TODO: BOUND THE FILL AREA TO A SQUARE MADE USING THE PATH EXTREMA TO LIMIT EXCESS FILLING IN THE EVENT OF ERROR
     
     # For sanity purposes, tool can always "paint" over existing labels. If we find some foreseeable reason why we might
     # not want this in all cases, we can re-add to the GUI.
@@ -367,8 +368,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@location=", ijk)
     print("@@@value=", value)
     
-    # Save state before doing anything
-    self.undoRedo.saveState()
     # Get the current label that the user wishes to assign using the tool
     label = EditUtil.EditUtil().getLabel()
     
@@ -386,43 +385,24 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     hi = thresholdMax
     
     location = ijk
-    """
-    #
-    # Find edge pixels
-    #
-    seeds = find_edges(location, 200, hi, lo, backgroundDrawArray)
-    
-    #
-    # Build path
-    #
-    
-    print("@@@BUILDING PATH")
-    paths = []
-    for seed in seeds:
-        if seed is None:
-            continue
-        repeat = False
-        for path in paths:
-            if seed in path:
-                repeat = True
-                break
-        if repeat:
-            continue
-        ret_val = build_path(seed, hi, lo, backgroundDrawArray)
-        if ret_val[0] == []:
-            continue
-        paths.append((ret_val[0],ret_val[2]))
-        visited = ret_val[1]
-        for pixel in visited:
-            labelDrawArray[pixel] = label
 
-    best_path = find_best_path(paths, ijk)
-    print(best_path[0], best_path[1])
-    if best_path[1] > 150:
-        # Too many dead ends! Let's try this again
-        lo -= 25
-    """
     best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+    print(best_path)
+    print("Dead ends:", dead_ends)
+    
+    if dead_ends > 150 or dead_ends < 0:
+        lo -= 25
+        print("Lowering min tolerance to:", lo)
+        # Too many dead ends! Let's try this again
+        #TODO: reflect change in tolerance spinbox
+        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+        print(best_path)
+        print("Dead ends:", dead_ends)
+        if dead_ends < 0:
+            return
+        
+    # Save state before doing anything
+    self.undoRedo.saveState()
     for pixel in visited:
         labelDrawArray[pixel] = label
     
@@ -435,11 +415,13 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # it may be to our benefit to update only once the automation across all slices is complete, rather
     # than once per slice.
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+    """
     if len(best_path) < 5:
         # Something went wrong
         print("@@@Path was unexpectedly short. Undoing.")
         self.undoRedo.undo()
         return
+    """
     
     #
     # Fill path
@@ -579,10 +561,6 @@ def gimme_a_path(location, seed_distance, hi, lo, bgArray):
   ##
   ###
   ###
-  ###
-  ## End HERE ##########
-  ##
-  ###
 
 def find_edge(point, offset, max_dist, hi, lo, bgArray):
     """Return the first edgepoint and its distance from point using offset.
@@ -639,7 +617,7 @@ def build_path(start, hi, lo, bgArray):
             neighbor = (location[0] + offset[0], location[1] + offset[1])
             if len(visited) > 1 and neighbor == start:
                 # lArray[neighbor] = label
-                print("Dead ends: ", dead_ends)
+                # print("Dead ends: ", dead_ends)
                 return (path, visited, dead_ends)
             if is_edge(neighbor, hi, lo, bgArray) and neighbor not in visited:
                 # lArray[neighbor] = label
@@ -650,7 +628,7 @@ def build_path(start, hi, lo, bgArray):
                 break
         if not found:
             # Dead end found, re-trace steps
-            print("@@@DEAD END!")
+            # print("@@@DEAD END!")
             dead_ends += 1
             path.pop()
             if len(path) > 0:
@@ -660,7 +638,7 @@ def build_path(start, hi, lo, bgArray):
 
 def find_best_path(paths, ijk):
     """Returns the best path from a list of paths ([points], [visited], dead_ends)"""
-    best_path = ([],0)
+    best_path = ([],[],-1)
     best_area = 0
     for path in paths:
         extrema = get_extrema(path[0])
