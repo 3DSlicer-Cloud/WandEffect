@@ -5,6 +5,7 @@ from EditorLib.EditOptions import HelpButton
 from EditorLib.EditOptions import EditOptions
 from EditorLib import EditUtil
 from EditorLib import LabelEffect
+import math
 
 #
 # The Editor Extension itself.
@@ -52,6 +53,26 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
     self.widgets.append(self.maxPixelsSpinBox)
 
+    ## For the offset value selection process
+    self.offsetvalueFrame = qt.QFrame(self.frame)
+    self.offsetvalueFrame.setLayout(qt.QHBoxLayout())
+    self.frame.layout().addWidget(self.offsetvalueFrame)
+    self.widgets.append(self.offsetvalueFrame)
+    self.offsetvalueLabel = qt.QLabel("Offset Value:", self.offsetvalueFrame)
+    self.offsetvalueLabel.setToolTip("Set the offset value shift upon an action")
+    self.offsetvalueFrame.layout().addWidget(self.offsetvalueLabel)
+    self.widgets.append(self.offsetvalueLabel)
+    self.offsetvalueSpinBox = qt.QDoubleSpinBox(self.offsetvalueFrame)
+    self.offsetvalueSpinBox.setToolTip("Set the offset value shift upon an action")
+    self.offsetvalueSpinBox.minimum = -1000
+    self.offsetvalueSpinBox.maximum = 1000
+    self.offsetvalueSpinBox.suffix = ""
+    self.offsetvalueFrame.layout().addWidget(self.offsetvalueSpinBox)
+    self.widgets.append(self.offsetvalueSpinBox)
+    ## End offset value selection
+ 
+
+    
     HelpButton(self.frame, "Use this tool to help you label all voxels enclosed in an area bounded by the the largest path of pixels within the specified threshold.")
 
     # don't connect the signals and slots directly - instead, add these
@@ -63,7 +84,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.paintOver.hide()
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
-    
+    self.connections.append( 
+      (self.offsetvalueSpinBox, 'valueChanged(double)', self.onOffsetValueSpinBoxChanged) )
+
 
     # Add vertical spacer
     self.frame.layout().addStretch(1)
@@ -87,7 +110,8 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     defaults = (
-      ("maxPixels", "2500"),
+      ("maxPixels", "25000"),
+      ("offsetvalue", '0'),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
@@ -104,7 +128,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       param = "LabelEffect,"+d[0]
       pvalue = self.parameterNode.GetParameter(param)
       if pvalue == '':
-        self.parameterNode.SetParameter(param, d[1])
+         self.parameterNode.SetParameter(param, d[1])
     self.parameterNode.SetDisableModifiedEvent(disableState)
 
   def updateGUIFromMRML(self,caller,event):
@@ -116,8 +140,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     super(TraceAndSelectOptions,self).updateGUIFromMRML(caller,event)
     self.disconnectWidgets()
     self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
+    self.offsetvalueSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,offsetvalue")))
     self.connectWidgets()
-
+                                            
   def onToleranceSpinBoxChanged(self,value):
     if self.updatingGUI:
       return
@@ -128,11 +153,18 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       return
     self.updateMRMLFromGUI()
 
+  def onOffsetValueSpinBoxChanged(self,value):
+    if self.updatingGUI:
+      return
+    self.updateMRMLFromGUI()
+
+    
   def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     super(TraceAndSelectOptions,self).updateMRMLFromGUI()
     self.parameterNode.SetParameter( "TraceAndSelect,maxPixels", str(self.maxPixelsSpinBox.value) )
+    self.parameterNode.SetParameter( "TraceAndSelect,offsetvalue", str(self.offsetvalueSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
     if not disableState:
       self.parameterNode.InvokePendingModifiedEvent()
@@ -206,32 +238,26 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     self.sliceLogic = sliceLogic
     self.fillMode = 'Plane'
 
+
+  ###
+  ###
+  ## START HERE ##########
+  ##
+  ###
+  ###
+  ###
+  ## START HERE ##########
+  ##
+  ###
+
   def apply(self,xy):
     #
     # get the parameters from MRML
     #
     # TODO: ADD SOME KIND OF ERROR MESSAGE INTERFACE TO GUI TO PRINT THINGS LIKE UNEXPECTED SHORT PATH
-    node = EditUtil.EditUtil().getParameterNode()
-    
-    # Max number of pixels to fill in (does not include path)
-    print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
-    maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
-    
-    # Whether or not threshold is enabled (should always be 1, since the option to disable was removed from GUI)
-    print("@@@Theshold:%s" % node.GetParameter("LabelEffect,paintThreshold"))
-    paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
-    
-    # Minimum intensity value to be detected
-    print("@@@Theshold Min:%s" % node.GetParameter("LabelEffect,paintThresholdMin"))
-    thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
-    
-    # Maximum intensity value to be detected
-    print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
-    thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
     
     # For sanity purposes, tool can always "paint" over existing labels. If we find some foreseeable reason why we might
     # not want this in all cases, we can re-add to the GUI.
-    paintOver = 1
 
     #
     # get the label and background volume nodes
@@ -261,9 +287,41 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     ijk.reverse()
     ijk = tuple(ijk)
 
+    ### IJK ACTIVE HERE
     #
     # Get the numpy array for the bg and label
     #
+    return self.fill(ijk)
+
+  def fill(self, ijk):
+    print("##############################\n$$$$$$$$$$$$$$$$$$$$$$$$\n", ijk,"\n##############################\n$$$$$$$$$$$$$$$$$$$$$$$$\n")
+    paintOver = 1
+    mean = (0, 0)
+    count = 0
+    node = EditUtil.EditUtil().getParameterNode()
+    
+    # Max number of pixels to fill in (does not include path)
+    print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
+    maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
+    
+    # Whether or not threshold is enabled (should always be 1, since the option to disable was removed from GUI)
+    print("@@@Theshold:%s" % node.GetParameter("LabelEffect,paintThreshold"))
+    paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
+    
+    # Minimum intensity value to be detected
+    print("@@@Theshold Min:%s" % node.GetParameter("LabelEffect,paintThresholdMin"))
+    thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
+    
+    # Maximum intensity value to be detected
+    print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
+    thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
+  
+    
+    labelLogic = self.sliceLogic.GetLabelLayer()
+    labelNode = labelLogic.GetVolumeNode()
+    backgroundLogic = self.sliceLogic.GetBackgroundLayer()
+    backgroundNode = backgroundLogic.GetVolumeNode()
+
     import vtk.util.numpy_support, numpy
     backgroundImage = backgroundNode.GetImageData()
     labelImage = labelNode.GetImageData()
@@ -272,8 +330,10 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     backgroundArray = vtk.util.numpy_support.vtk_to_numpy(backgroundImage.GetPointData().GetScalars()).reshape(shape)
     labelArray = vtk.util.numpy_support.vtk_to_numpy(labelImage.GetPointData().GetScalars()).reshape(shape)
 
+    ijk_reconstruction_indexes = []
     # THIS SHOULD ALWAYS BE TRUE
     # VOLUME MODE IS DISABLED BECAUSE I HAVE NO CLUE WHAT IT IS
+    original_ijk = list(ijk)
     if self.fillMode == 'Plane':
       # select the plane corresponding to current slice orientation
       # for the input volume
@@ -283,14 +343,20 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         backgroundDrawArray = backgroundArray[:,:,k]
         labelDrawArray = labelArray[:,:,k]
         ijk = (i, j)
+        original_ijk[2] = k - 1
+        ijk_reconstruction_indexes = (0,1)
       if ijkPlane == 'IK':
         backgroundDrawArray = backgroundArray[:,j,:]
         labelDrawArray = labelArray[:,j,:]
+        original_ijk[1] = j - 1
         ijk = (i, k)
+        ijk_reconstruction_indexes = (0, 2)
       if ijkPlane == 'IJ':
         backgroundDrawArray = backgroundArray[i,:,:]
         labelDrawArray = labelArray[i,:,:]
+        original_ijk[0] = i - 1
         ijk = (j, k)
+        ijk_reconstruction_indexes = (1,2)
     else:
         print("HOW DID YOU DO THAT??? WHAT DID YOU DO TO ACTIVATE VOLUME MODE???")
         return
@@ -373,7 +439,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         # Something went wrong
         print("@@@Path was unexpectedly short. Undoing.")
         self.undoRedo.undo()
-        # self.undoRedo.clearRedoStack()
         return
     
     #
@@ -400,6 +465,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@FILLING PATH")
     while toVisit != []:
       location = toVisit.pop(0)
+
       try:
         l = labelDrawArray[location]
         b = backgroundDrawArray[location]
@@ -410,6 +476,10 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         continue
       try:
         if (paintOver and l == label):
+          temp1 = mean[0] + location[0]
+          temp2 = mean[1] + location[1]
+          mean = (temp1, temp2)
+          count += 1
           # label is the current one, but maybe it was filled with another high/low value,
           # so we have to visit it once (and only once) in this session, too
           if  labelDrawVisitedArray[location]:
@@ -440,8 +510,34 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
           toVisit.append((location[0]    , location[1] + 1 ))
 
     # signal to slicer that the label needs to be updated
+    ## CHANGE OFFSET
+    print("@@@Offset:|%s|" % node.GetParameter("TraceAndSelect,offsetvalue"))
+    self.offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
+    
+    if self.offset != 0:
+      layoutManager = slicer.app.layoutManager()
+      widget = layoutManager.sliceWidget('Red')
+      rednode = widget.sliceLogic().GetSliceNode()
+      rednode.SetSliceOffset(rednode.GetSliceOffset() + math.copysign(1, self.offset))
+      node.SetParameter("TraceAndSelect,offsetvalue", str(self.offset - math.copysign(1, self.offset)))
+      print(self.offset)
+      
+      ### Calc centoid mean sutff here
+
+      rec_mean = (mean[0]/count, mean[1]/count)
+      print("MEAN:", rec_mean)
+      rec_ijk = list(original_ijk)
+      rec_ijk[ijk_reconstruction_indexes[0]] = rec_mean[0]
+      rec_ijk[ijk_reconstruction_indexes[1]] = rec_mean[1]
+      print("RECURSIVE IJK:", rec_ijk)
+      print("#########RECURSE#########")
+      return self.fill(rec_ijk)
+      
+      ###
+    
     print("@@@FILL DONE")
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+    
     return
 
 def gimme_a_path(location, seed_distance, hi, lo, bgArray):
@@ -476,7 +572,18 @@ def gimme_a_path(location, seed_distance, hi, lo, bgArray):
     #
     best_path = find_best_path(paths, location)
     return best_path
-    
+  
+  ###
+  ###
+  ## End HERE ##########
+  ##
+  ###
+  ###
+  ###
+  ## End HERE ##########
+  ##
+  ###
+
 def find_edge(point, offset, max_dist, hi, lo, bgArray):
     """Return the first edgepoint and its distance from point using offset.
     None if no path found.
@@ -736,6 +843,5 @@ class TraceAndSelectWidget:
 
   def exit(self):
     pass
-
 
 # Steven wuz here
