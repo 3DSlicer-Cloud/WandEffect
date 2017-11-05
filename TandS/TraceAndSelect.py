@@ -320,16 +320,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     hi = thresholdMax
     
     location = ijk
-    offsets = [
-        (0, 1),
-        (1, 1),
-        (1, 0),
-        (1, -1),
-        (0, -1),
-        (-1, -1),
-        (-1, 0),
-        (-1, 1)
-    ]
+    """
     #
     # Find edge pixels
     #
@@ -338,6 +329,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     # Build path
     #
+    
     print("@@@BUILDING PATH")
     paths = []
     for seed in seeds:
@@ -353,26 +345,20 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         ret_val = build_path(seed, hi, lo, backgroundDrawArray)
         if ret_val[0] == []:
             continue
-        paths.append(ret_val[0])
+        paths.append((ret_val[0],ret_val[2]))
         visited = ret_val[1]
         for pixel in visited:
             labelDrawArray[pixel] = label
-    best_path = []
-    x_max = -1
-    # TODO: FIX BEST LENGTH ALG
-    # Current implementation works off assumption that longest path is the largest
-    # have already run into cases where this simply isn't true, and results in the wrong
-    # path being filled.
-    # Best solution would be to fix the is_inside_path alg to be more accurate, and simply
-    # trim paths during the build path section by checking if any seed points are already contained
-    # within previous path(s).
-    for path in paths:
-        path_x = get_max_x(path)
-        if path_x > x_max:
-            x_max = path_x
-            best_path = path
-        # if len(path) > len(best_path):
-        #     best_path = path
+
+    best_path = find_best_path(paths, ijk)
+    print(best_path[0], best_path[1])
+    if best_path[1] > 150:
+        # Too many dead ends! Let's try this again
+        lo -= 25
+    """
+    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+    for pixel in visited:
+        labelDrawArray[pixel] = label
     
     # signal to slicer that the label needs to be updated
     # This isn't entirely necessary, but we do this here because the path has been labeled,
@@ -383,12 +369,11 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # it may be to our benefit to update only once the automation across all slices is complete, rather
     # than once per slice.
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
-    print(best_path)
     if len(best_path) < 5:
         # Something went wrong
         print("@@@Path was unexpectedly short. Undoing.")
         self.undoRedo.undo()
-        self.undoRedo.clearRedoStack()
+        # self.undoRedo.clearRedoStack()
         return
     
     #
@@ -459,6 +444,39 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
     return
 
+def gimme_a_path(location, seed_distance, hi, lo, bgArray):
+    """Finds the seeds, then builds the paths, then outputs the best path. No messy stuff required."""
+    #
+    # Find edge pixels
+    #
+    seeds = find_edges(location, seed_distance, hi, lo, bgArray)
+    
+    #
+    # Build paths
+    #
+    print("@@@BUILDING PATH")
+    paths = []
+    for seed in seeds:
+        if seed is None:
+            continue
+        repeat = False
+        for path in paths:
+            if seed in path:
+                repeat = True
+            break
+        if repeat:
+            continue
+        ret_val = build_path(seed, hi, lo, bgArray)
+        if ret_val[0] == []:
+            continue
+        paths.append(ret_val)
+    
+    #
+    # Find best path
+    #
+    best_path = find_best_path(paths, location)
+    return best_path
+    
 def find_edge(point, offset, max_dist, hi, lo, bgArray):
     """Return the first edgepoint and its distance from point using offset.
     None if no path found.
@@ -494,6 +512,7 @@ def find_edges(starting_point, max_dist, hi, lo, bgArray):
 
 def build_path(start, hi, lo, bgArray):
     """Return a complete path from start."""
+    dead_ends = 0
     offsets = [
         (0, 1),
         (1, 1),
@@ -513,7 +532,8 @@ def build_path(start, hi, lo, bgArray):
             neighbor = (location[0] + offset[0], location[1] + offset[1])
             if len(visited) > 1 and neighbor == start:
                 # lArray[neighbor] = label
-                return (path, visited)
+                print("Dead ends: ", dead_ends)
+                return (path, visited, dead_ends)
             if is_edge(neighbor, hi, lo, bgArray) and neighbor not in visited:
                 # lArray[neighbor] = label
                 visited.append(neighbor)
@@ -524,12 +544,36 @@ def build_path(start, hi, lo, bgArray):
         if not found:
             # Dead end found, re-trace steps
             print("@@@DEAD END!")
+            dead_ends += 1
             path.pop()
             if len(path) > 0:
                 location = path[len(path)-1]
     print("@@@Edge is not part of the path? What the?")
-    return ([],[])
+    return ([],[], -1)
 
+def find_best_path(paths, ijk):
+    """Returns the best path from a list of paths ([points], [visited], dead_ends)"""
+    best_path = ([],0)
+    best_area = 0
+    for path in paths:
+        extrema = get_extrema(path[0])
+        # Check if ijk is likely contained within the path
+        if extrema[0] < ijk[0] < extrema[1] and extrema[2] < ijk[1] < extrema[3]:
+            # Create an over estimate of the approximate area of the path
+            area = (extrema[1]-extrema[0])*(extrema[3]-extrema[2])
+            if area > best_area:
+                best_path = path
+                best_area = area
+    return best_path
+        
+
+def get_extrema(list):
+    """Returns the max and min x and y values from a list of coordinate tuples in the form of (min_x, max_x, min_y, max_y)."""
+    max_x = max(list,key=lambda item:item[0])[0]
+    max_y = max(list,key=lambda item:item[1])[1]
+    min_x = min(list,key=lambda item:item[0])[0]
+    min_y = min(list,key=lambda item:item[1])[1]
+    return (min_x, max_x, min_y, max_y)
 
 def is_edge(location, hi, lo, bgArray):
     """Return true is location is an edge pixel."""
@@ -608,10 +652,6 @@ def get_point_inside_path(path):
             return tmp
     print("@@@There are no adjacent points inside the path???")
     return None
-	
-def get_max_x(list):
-    """Returns the max x of a list of coordinate tuples."""
-    return max(list,key=lambda item:item[0])[0]
 
 #
 # The TraceAndSelect class definition
@@ -696,5 +736,6 @@ class TraceAndSelectWidget:
 
   def exit(self):
     pass
+
 
 # Steven wuz here

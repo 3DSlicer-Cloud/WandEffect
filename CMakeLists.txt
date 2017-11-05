@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(TraceAndSelect)
+project(FastSlice)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
@@ -20,6 +20,7 @@ include(${Slicer_USE_FILE})
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(TandS)
+add_subdirectory(AutoTrace)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
