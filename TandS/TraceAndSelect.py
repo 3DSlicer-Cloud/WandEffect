@@ -309,7 +309,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     return self.fill(ijk)
 
-  def fill(self, ijk):
+  def fill(self, ijk, optional_seeds = []):
     paintOver = 1
     mean = (0, 0)
     count = 0
@@ -399,7 +399,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     location = ijk
 
-    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
+                                                 optional_seeds)
     #print(best_path)
     print("Dead ends:", dead_ends)
     
@@ -408,7 +409,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         print("Lowering min tolerance to:", lo)
         # Too many dead ends! Let's try this again
         # TODO: reflect change in tolerance spinbox
-        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
+                                                     optional_seeds)
         print(best_path)
         print("Dead ends:", dead_ends)
         if dead_ends < 0:
@@ -523,8 +525,9 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       
       ### Calc centoid mean sutff here
 
-      rec_mean = (mean[0]/count, mean[1]/count)
-      print("MEAN:", rec_mean)
+      recs_mean = (mean[0]/count, mean[1]/count)
+      rec_mean = get_optional_seeds(best_path, recs_mean)[0]
+      print("MEAN:", rec_mean, recs_mean)
       rec_ijk = list(original_ijk)
       for i in range(0,3):
         rec_ijk[i] = int(rec_ijk[i] + int(math.copysign(1, self.offset)))
@@ -532,7 +535,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       rec_ijk[ijk_reconstruction_indexes[1]] = rec_mean[1]
       print("RECURSIVE IJK:", rec_ijk)
       print("#########RECURSE#########")
-      return self.fill(rec_ijk)
+      return self.fill(rec_ijk, get_optional_seeds(best_path, recs_mean))
       
       ###
     
@@ -542,13 +545,35 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:Green}"))
     return
 
-def gimme_a_path(location, seed_distance, hi, lo, bgArray, optional_seeds=False):
+import random
+  
+def get_optional_seeds(seeds, mid, a= 2, b=3):
+  optional_seeds = []
+  maxes = [0,0]
+  mins = [10000, 10000]
+  for i in seeds:
+    maxes[0] = max(i[0], maxes[0])
+    maxes[1] = max(i[1], maxes[1])
+    mins[0] = min(i[0], mins[0])
+    mins[1] = min(i[1], mins[1])
+    
+  optional_seeds.append( (int(mid[0] + a*mins[0])/b, int(mid[1]) ))
+  optional_seeds.append( ( int(mid[0]), int(mid[1] + a*mins[1])/b) )
+  optional_seeds.append( (int(mid[0] + a*maxes[0])/b  ,int(mid[1])) )
+  optional_seeds.append( (int(mid[0]), int(mid[1] + a*mins[1])/b) )
+
+  return optional_seeds
+  
+  
+def gimme_a_path(location, seed_distance, hi, lo, bgArray, optional_seeds=[]):
     """Finds the seeds, then builds the paths, then outputs the best path. No messy stuff required."""
     #
     # Find edge pixels
     #
     seeds = find_edges(location, seed_distance, hi, lo, bgArray)
-    
+    print("BEFORE", seeds)
+    seeds.extend(optional_seeds)
+    print("AFTER", seeds)
     #
     # Build paths
     #
