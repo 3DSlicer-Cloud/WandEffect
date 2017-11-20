@@ -6,6 +6,6 @@ To prepare your machine for testing, do the following:
 
 1. Install the **nightly** build of 3DSlicer for your operating system, found [here](http://download.slicer.org/).
 2. Download DICOM files, found [here](https://drive.google.com/a/umich.edu/file/d/0B0dHApcloVBkVElBMDU0NDk3NGc/view?usp=sharing).
-3. Clone this repository: `git clone https://github.com/FastSlice/BuiltExtension.git`.
+3. Clone this repository: `git clone https://github.com/FastSlice/Extension.git`.
 
 To test the extension, follow the instructions in [this YouTube video](https://youtu.be/qJFSeH6n0QE).
