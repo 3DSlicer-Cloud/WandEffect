@@ -373,38 +373,49 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     # Use lo and hi for threshold checks
     # Easiest way to do things is check if a pixel is outside the threshold, ie.
-    """
-    try:
-        b = backgroundDrawArray[(x,y)]
-    except IndexError:
-        NOT IN THRESHOLD (coordinates exceed bounds of array)
-    if b < lo or b > hi:
-       NOT IN THRESHOLD (intensity is too high or low)
-    """
+
     lo = thresholdMin
     hi = thresholdMax
     
     location = ijk
 
     best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
-    print(best_path)
-    print("Dead ends:", dead_ends)
+    # print(best_path)
+    print("@@@Dead ends:", dead_ends)
     
+    attempts = 0
+    max_attempts = 2
+    while dead_ends > 150 or dead_ends < 0 and attempts < max_attempts:
+        attempts += 1
+        lo -= 25
+        print("Lowering min tolerance to:", lo)
+        node.SetParameter("LabelEffect,paintThresholdMin", str(lo))
+        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+        print("@@@Dead ends:", dead_ends)
+    
+    if dead_ends < 0:
+        print("@@@No path found? Weird.")
+        return
+
+        
+    
+    """
     if dead_ends > 150 or dead_ends < 0:
         lo -= 25
         print("Lowering min tolerance to:", lo)
         # Too many dead ends! Let's try this again
         #TODO: reflect change in tolerance spinbox
         best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
-        print(best_path)
-        print("Dead ends:", dead_ends)
+        # print(best_path)
+        print("@@@Dead ends:", dead_ends)
         if dead_ends < 0:
             return
+    """
         
     # Save state before doing anything
     self.undoRedo.saveState()
     for pixel in visited:
-        labelDrawArray[pixel] = label
+        labelDrawArray[pixel] = label + 1
     
     # signal to slicer that the label needs to be updated
     # This isn't entirely necessary, but we do this here because the path has been labeled,
@@ -415,27 +426,15 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # it may be to our benefit to update only once the automation across all slices is complete, rather
     # than once per slice.
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
-    """
-    if len(best_path) < 5:
-        # Something went wrong
-        print("@@@Path was unexpectedly short. Undoing.")
-        self.undoRedo.undo()
-        return
-    """
     
     #
     # Fill path
     #
     fill_point = ijk
-    """
-    if not is_inside_path(fill_point, best_path):
-        print("@@@Fill point moved from: ", fill_point)
-        fill_point = get_point_inside_path(best_path)
-        print("@@@to: ", fill_point)
-    """
     
     # Fill the path using a recursive search
     toVisit = [fill_point,]
+    extrema = get_extrema(best_path)
     # Create a map that contains the location of the pixels
     # that have been already visited (added or considered to be added).
     # This is required if paintOver is enabled because then we reconsider
@@ -478,6 +477,11 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         continue
       if location in best_path:
         continue
+      if not (extrema[0] < location[0] < extrema[1] and extrema[2] < location[1] < extrema[3]):
+        # Went out of bounds for path
+        print("@@@WENT OUT OF BOUNDS FOR PATH!")
+        self.undoRedo.undo()
+        return
       labelDrawArray[location] = label
       if l != label:
         # only count those pixels that were changed (to allow step-by-step growing by multiple mouse clicks)
@@ -590,7 +594,7 @@ def find_edges(starting_point, max_dist, hi, lo, bgArray):
             edgePoints.append(first_result[0])
             if b < lo or b > hi:
                 # Try to find second point, since starting click was outside threshold
-                second_result = find_edge(first_result[0], offset, first_result[1], hi, lo, bgArray)
+                second_result = find_edge(first_result[0], offset, max_dist - first_result[1], hi, lo, bgArray)
                 if second_result is not None:
                     edgePoints.append(second_result[0])
     return edgePoints
