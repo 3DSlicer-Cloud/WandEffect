@@ -200,6 +200,9 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
     super(TraceAndSelectTool,self).__init__(sliceWidget)
     # create a logic instance to do the non-gui work
     self.logic = TraceAndSelectLogic(self.sliceWidget.sliceLogic())
+    
+    self.prevPath = []
+    self.prevFillPoint = None
 
   def cleanup(self):
     super(TraceAndSelectTool,self).cleanup()
@@ -208,21 +211,42 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
     """
     handle events from the render window interactor
     """
-
     # let the superclass deal with the event if it wants to
-    if super(TraceAndSelectTool,self).processEvent(caller,event):
-      return
-    # TODO COPY AND PASTE THIS SHIT
+    super(TraceAndSelectTool,self).processEvent(caller,event)
+      # return
     if event == "LeftButtonPressEvent":
       xy = self.interactor.GetEventPosition()
       sliceLogic = self.sliceWidget.sliceLogic()
       logic = TraceAndSelectLogic(sliceLogic)
       logic.undoRedo = self.undoRedo
-      logic.apply(xy)
+      if self.prevPath != []:
+        logic.apply(xy, forced_path=self.prevPath, forced_point=self.prevFillPoint)
+        self.prevPath = []
+        self.prevFillPoint = None
+      else:
+        logic.apply(xy)
       print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
       self.abortEvent(event)
     elif event == "RightButtonPressEvent":
-        pass
+        xy = self.interactor.GetEventPosition()
+        sliceLogic = self.sliceWidget.sliceLogic()
+        logic = TraceAndSelectLogic(sliceLogic)
+        logic.undoRedo = self.undoRedo
+        # Erase stored path and remove from view
+        if self.prevPath != []:
+            self.prevPath = []
+            self.prevFillPoint = None
+            logic.undoRedo.undo()
+        # Store prevPath and prevFillPoint
+        self.prevPath, self.prevFillPoint = logic.apply(xy, 1)
+        print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
+        self.abortEvent(event)
+    elif event == "ModifiedEvent":  # Offset was changed on one of the viewing panels
+        # Erase stored path and remove from view
+        if self.prevPath != []:
+            self.prevPath = []
+            self.prevFillPoint = None
+            self.undoRedo.undo()
     else:
       pass
 
@@ -251,6 +275,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
   def __init__(self,sliceLogic):
     self.sliceLogic = sliceLogic
     self.fillMode = 'Plane'
+    #self.prevPath = []
+    #self.prevFillPoint = None
 
 
   ###
@@ -264,7 +290,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
   ##
   ###
 
-  def apply(self,xy):
+  def apply(self,xy, mode=0, forced_path=None, forced_point=None):
     #
     # get the parameters from MRML
     #
@@ -309,7 +335,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     node = EditUtil.EditUtil().getParameterNode()
     offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
-    if offset != 0:
+    if offset != 0 and mode == 0:
       self.progress = qt.QProgressDialog()
       self.progress.setLabelText("Processing Slices...")
       self.progress.setCancelButtonText("Abort Fill")
@@ -317,9 +343,10 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       self.progress.setMaximum(abs(offset))
       self.progress.setAutoClose(1)
       self.progress.open()
-    return self.fill(ijk)
+    return self.fill(ijk, [], mode, forced_path, forced_point)
 
-  def fill(self, ijk, optional_seeds = []):
+  def fill(self, ijk, optional_seeds=[], mode=0, forced_path=None, forced_point=None):
+    print("Mode: %d" % mode)
     paintOver = 1
     mean = (0, 0)
     count = 0
@@ -400,48 +427,51 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     lo = thresholdMin
     hi = thresholdMax
     
-    location = ijk
+    best_path = []
+    fill_point = ijk
 
-    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
-                                                 optional_seeds)
-    print("@@@Dead ends:", dead_ends)
-    
-    attempts = 0
-    max_attempts = 2
-    while dead_ends > 150 or dead_ends < 0 and attempts < max_attempts:
-        attempts += 1
-        lo -= 25
-        print("Lowering min tolerance to:", lo)
-        node.SetParameter("LabelEffect,paintThresholdMin", str(lo))
+    if mode == 0 and forced_path is not None and forced_point is not None:
+        best_path = forced_path
+        fill_point = forced_point
+    else:
+        # Build path
+        
         best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
                                                      optional_seeds)
         print("@@@Dead ends:", dead_ends)
-    
-    if dead_ends < 0:
-        print("@@@No path found? Weird.")
-        node.SetParameter("TraceAndSelect,errorMessage", str("Error: could not find any suitable path."))
-        node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
-        return
         
-    # Save state before doing anything
-    self.undoRedo.saveState()
-    for pixel in visited:
-        labelDrawArray[pixel] = label + 1
-    
-    # signal to slicer that the label needs to be updated
-    # This isn't entirely necessary, but we do this here because the path has been labeled,
-    # but if the path doesn't meet size requirements, we may return here
-    # it's important to note that any work done without signaling an update is still saved,
-    # BUT, it is not displayed until the next update
-    # I don't know how costly an update is, however, for automation purposes down the line,
-    # it may be to our benefit to update only once the automation across all slices is complete, rather
-    # than once per slice.
-    EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+        attempts = 0
+        max_attempts = 2
+        while dead_ends > 150 or dead_ends < 0 and attempts < max_attempts:
+            attempts += 1
+            lo -= 25
+            print("Lowering min tolerance to:", lo)
+            node.SetParameter("LabelEffect,paintThresholdMin", str(lo))
+            best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
+                                                         optional_seeds)
+            print("@@@Dead ends:", dead_ends)
+        
+        if dead_ends < 0:
+            print("@@@No path found? Weird.")
+            node.SetParameter("TraceAndSelect,errorMessage", str("Error: could not find any suitable path."))
+            node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
+            return
+        
+        # Save state before doing anything
+        self.undoRedo.saveState()
+        for pixel in visited:
+            labelDrawArray[pixel] = label
+        
+        EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
+
+        if mode == 1:  # Outline only mode
+            print("Outline made, returning.")
+            return (best_path, ijk)
+        
     
     #
     # Fill path
     #
-    fill_point = ijk
     
     # Fill the path using a recursive search
     toVisit = [fill_point,]
@@ -543,7 +573,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       rec_ijk[ijk_reconstruction_indexes[1]] = rec_mean[1]
       print("RECURSIVE IJK:", rec_ijk)
       print("#########RECURSE#########")
-      return self.fill(rec_ijk, get_optional_seeds(best_path, recs_mean))
+      return self.fill(rec_ijk, optional_seeds=get_optional_seeds(best_path, recs_mean))
       
       ###
     
@@ -607,8 +637,7 @@ def gimme_a_path(location, seed_distance, hi, lo, bgArray, optional_seeds=[]):
     # Find best path
     #
     best_path = find_best_path(paths, location)
-    for edge in best_path[0]:
-        # Smooth the path
+    best_path = smooth_path(best_path, hi, lo, bgArray)
         
     return best_path
     
@@ -630,11 +659,21 @@ def smooth_path(path_obj, hi, lo, bgArray):
     for pixel in best_path:
         for offset in offsets:
             neighbor = (pixel[0] + offset[0], pixel[1] + offset[1])
-            if neighbor in visisted or lo < bgArray[neighbor] < hi:
+            if neighbor in visited or lo < bgArray[neighbor] < hi:
                 continue
+            """
             distance = abs(bgArray[neighbor] - bgArray[pixel])
-            percentage = float(distance) / bgArray[pixel]
+            percentage = float(distance) / (bgArray[pixel] + 3024)  # Add 3024 to scale with negative grayscale vals
             if percentage <= 0.2:
+                visited.append(neighbor)
+                num_pixels_added += 1
+            """
+            # distance = abs(bgArray[neighbor] - bgArray[pixel])
+            if bgArray[neighbor] > hi:
+                distance = bgArray[neighbor] - hi
+            else:
+                distance = lo - bgArray[neighbor]
+            if distance <= 125:
                 visited.append(neighbor)
                 num_pixels_added += 1
     print("%d pixels were added during smoothing." %num_pixels_added)
