@@ -307,6 +307,16 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     # Get the numpy array for the bg and label
     #
+    node = EditUtil.EditUtil().getParameterNode()
+    offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
+    if offset != 0:
+      self.progress = qt.QProgressDialog()
+      self.progress.setLabelText("Processing Slices...")
+      self.progress.setCancelButtonText("Abort Fill")
+      self.progress.setMinimum(0)
+      self.progress.setMaximum(abs(offset))
+      self.progress.setAutoClose(1)
+      self.progress.open()
     return self.fill(ijk)
 
   def fill(self, ijk, optional_seeds = []):
@@ -503,7 +513,17 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     self.offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
     print("OFFSET SIGN: %s" % math.copysign(1, self.offset) )
 
-    if self.offset != 0:      
+    if self.offset != 0:
+      if self.progress.wasCanceled:
+        self.offset = 0
+        layoutManager = slicer.app.layoutManager()
+        widget = layoutManager.sliceWidget('Red')
+        rednode = widget.sliceLogic().GetSliceNode()
+        rednode.SetSliceOffset(rednode.GetSliceOffset() + math.copysign(1, self.offset))
+        node.SetParameter("TraceAndSelect,offsetvalue",
+                          str(0))
+        return
+      self.progress.setValue(self.progress.maximum - abs(self.offset))
       layoutManager = slicer.app.layoutManager()
       widget = layoutManager.sliceWidget('Red')
       rednode = widget.sliceLogic().GetSliceNode()
@@ -511,7 +531,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       node.SetParameter("TraceAndSelect,offsetvalue", str(self.offset -  math.copysign(1, self.offset)))
       print(self.offset)
       
-      ### Calc centoid mean sutff here
+      ### Calc centoid mean stuff here
 
       recs_mean = (mean[0]/count, mean[1]/count)
       rec_mean = get_optional_seeds(best_path, recs_mean)[0]
