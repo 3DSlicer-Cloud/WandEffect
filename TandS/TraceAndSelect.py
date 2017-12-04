@@ -31,6 +31,10 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.attributes = ('MouseTool')
     self.displayName = 'TraceAndSelect Effect'
     self.offset = 0
+    # self.usesThreshold = True
+    self.usesPaintOver = False
+
+
   def __del__(self):
     super(TraceAndSelectOptions,self).__del__()
 
@@ -52,6 +56,12 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.maxPixelsSpinBox.suffix = ""
     self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
     self.widgets.append(self.maxPixelsSpinBox)
+    
+    ## Preview checkbox
+    self.preview = qt.QCheckBox("Preview outlines", self.frame)
+    self.preview.setToolTip("Preview the outline of a selection with right-click.")
+    self.frame.layout().addWidget(self.preview)
+    ## End preview checkbox
 
     ## For the offset value selection process
     self.offsetvalueFrame = qt.QFrame(self.frame)
@@ -90,9 +100,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     # elements to be interlinked with signal/slots but still get updated
     # as a unit to the new value of the mrml node.
     self.thresholdPaint.hide()
-    self.paintOver.hide()
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
+    self.connections.append( (self.preview, "clicked()", self.onPreviewChanged ) )
     self.connections.append( 
       (self.offsetvalueSpinBox, 'valueChanged(double)', self.onOffsetValueSpinBoxChanged) )
 
@@ -121,6 +131,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     defaults = (
       ("maxPixels", "25000"),
       ("offsetvalue", '0'),
+      ("preview", "0"),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
@@ -152,6 +163,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.errorMessageFrame.setStyleSheet("QTextEdit {color:blue}")
     self.errorMessageFrame.setStyleSheet(self.parameterNode.GetParameter("TraceAndSelect,errorMessageColor"))
     self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
+    self.preview.setChecked( int(self.parameterNode.GetParameter("TraceAndSelect,preview")) )
     self.offsetvalueSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,offsetvalue")))
     self.connectWidgets()
                                             
@@ -170,11 +182,20 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       return
     self.updateMRMLFromGUI()
 
+  def onPreviewChanged(self):
+    if self.updatingGUI:
+      return
+    self.updateMRMLFromGUI()
+
     
   def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
     super(TraceAndSelectOptions,self).updateMRMLFromGUI()
+    if self.preview.checked:
+        self.parameterNode.SetParameter( "TraceAndSelect,preview", "1" )
+    else:
+        self.parameterNode.SetParameter( "TraceAndSelect,preview", "0" )
     self.parameterNode.SetParameter( "TraceAndSelect,maxPixels", str(self.maxPixelsSpinBox.value) )
     self.parameterNode.SetParameter( "TraceAndSelect,offsetvalue", str(self.offsetvalueSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
@@ -211,9 +232,21 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
     """
     handle events from the render window interactor
     """
+    
+    node = EditUtil.EditUtil().getParameterNode()
+    preview = int(node.GetParameter("TraceAndSelect,preview"))
+    # Clear any saved outlines if preview has been just disabled
+    if not preview:
+        if self.prevPath != []:
+            self.prevPath = []
+            self.prevFillPoint = None
+            self.undoRedo.undo()
+    
+    
     # let the superclass deal with the event if it wants to
     super(TraceAndSelectTool,self).processEvent(caller,event)
-      # return
+    
+    # LEFT CLICK
     if event == "LeftButtonPressEvent":
       xy = self.interactor.GetEventPosition()
       sliceLogic = self.sliceWidget.sliceLogic()
@@ -227,7 +260,8 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
         logic.apply(xy)
       print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
       self.abortEvent(event)
-    elif event == "RightButtonPressEvent":
+    # RIGHT CLICK
+    elif event == "RightButtonPressEvent" and preview:
         xy = self.interactor.GetEventPosition()
         sliceLogic = self.sliceWidget.sliceLogic()
         logic = TraceAndSelectLogic(sliceLogic)
@@ -241,6 +275,7 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
         self.prevPath, self.prevFillPoint = logic.apply(xy, 1)
         print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
         self.abortEvent(event)
+    # SLICE VIEW HAS CHANGED
     elif event == "ModifiedEvent":  # Offset was changed on one of the viewing panels
         # Erase stored path and remove from view
         if self.prevPath != []:
@@ -275,8 +310,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
   def __init__(self,sliceLogic):
     self.sliceLogic = sliceLogic
     self.fillMode = 'Plane'
-    #self.prevPath = []
-    #self.prevFillPoint = None
+
 
 
   ###
