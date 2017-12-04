@@ -30,13 +30,13 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     # 'Disabled' - not available
     self.attributes = ('MouseTool')
     self.displayName = 'TraceAndSelect Effect'
-
+    self.offset = 0
   def __del__(self):
     super(TraceAndSelectOptions,self).__del__()
 
   def create(self):
     super(TraceAndSelectOptions,self).create()
-
+    
     self.maxPixelsFrame = qt.QFrame(self.frame)
     self.maxPixelsFrame.setLayout(qt.QHBoxLayout())
     self.frame.layout().addWidget(self.maxPixelsFrame)
@@ -71,7 +71,16 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.widgets.append(self.offsetvalueSpinBox)
     ## End offset value selection
  
-
+    ## ERROR MESSAGE FRAME
+    self.errorMessageFrame = qt.QTextEdit(self.frame)
+    self.frame.layout().addWidget(self.errorMessageFrame)
+    #self.errorMessageFrame.setLayout(qt.QHBoxLayout)
+    self.errorMessageFrame.setFixedWidth(280)
+    self.errorMessageFrame.setReadOnly(True)
+    self.errorMessageFrame.setText('No Error Detected')
+    self.errorMessageFrame.setStyleSheet("QTextEdit {color:green}")
+    self.widgets.append(self.errorMessageFrame)
+    ## END ERROR MESSAGE FRAME
     
     HelpButton(self.frame, "Use this tool to help you label all voxels enclosed in an area bounded by the the largest path of pixels within the specified threshold.")
 
@@ -139,6 +148,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
         return
     super(TraceAndSelectOptions,self).updateGUIFromMRML(caller,event)
     self.disconnectWidgets()
+    self.errorMessageFrame.setText(str(self.parameterNode.GetParameter("TraceAndSelect,errorMessage")))
+    self.errorMessageFrame.setStyleSheet("QTextEdit {color:blue}")
+    self.errorMessageFrame.setStyleSheet(self.parameterNode.GetParameter("TraceAndSelect,errorMessageColor"))
     self.maxPixelsSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,maxPixels")) )
     self.offsetvalueSpinBox.setValue( float(self.parameterNode.GetParameter("TraceAndSelect,offsetvalue")))
     self.connectWidgets()
@@ -200,7 +212,7 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
     # let the superclass deal with the event if it wants to
     if super(TraceAndSelectTool,self).processEvent(caller,event):
       return
-
+    # TODO COPY AND PASTE THIS SHIT
     if event == "LeftButtonPressEvent":
       xy = self.interactor.GetEventPosition()
       sliceLogic = self.sliceWidget.sliceLogic()
@@ -209,6 +221,8 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
       logic.apply(xy)
       print("Got a %s at %s in %s" % (event,str(xy),self.sliceWidget.sliceLogic().GetSliceNode().GetName()))
       self.abortEvent(event)
+    elif event == "RightButtonPressEvent":
+        pass
     else:
       pass
 
@@ -254,8 +268,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     # get the parameters from MRML
     #
-    # TODO: ADD SOME KIND OF ERROR MESSAGE INTERFACE TO GUI TO PRINT THINGS LIKE UNEXPECTED SHORT PATH
-    # TODO: BOUND THE FILL AREA TO A SQUARE MADE USING THE PATH EXTREMA TO LIMIT EXCESS FILLING IN THE EVENT OF ERROR
     
     # For sanity purposes, tool can always "paint" over existing labels. If we find some foreseeable reason why we might
     # not want this in all cases, we can re-add to the GUI.
@@ -267,6 +279,9 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     labelNode = labelLogic.GetVolumeNode()
     backgroundLogic = self.sliceLogic.GetBackgroundLayer()
     backgroundNode = backgroundLogic.GetVolumeNode()
+
+    ##### self.errorMessageFrame.textCursor().insertHtml('Error Detected!')
+    ##### self.errorMessageFrame.setStyleSheet("QTextEdit {color:red}")
 
     #
     # get the ijk location of the clicked point
@@ -294,8 +309,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     #
     return self.fill(ijk)
 
-  def fill(self, ijk):
-    print("##############################\n$$$$$$$$$$$$$$$$$$$$$$$$\n", ijk,"\n##############################\n$$$$$$$$$$$$$$$$$$$$$$$$\n")
+  def fill(self, ijk, optional_seeds = []):
     paintOver = 1
     mean = (0, 0)
     count = 0
@@ -344,22 +358,21 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         backgroundDrawArray = backgroundArray[:,:,k]
         labelDrawArray = labelArray[:,:,k]
         ijk = (i, j)
-        original_ijk[2] = k - 1
         ijk_reconstruction_indexes = (0,1)
       if ijkPlane == 'IK':
         backgroundDrawArray = backgroundArray[:,j,:]
         labelDrawArray = labelArray[:,j,:]
-        original_ijk[1] = j - 1
         ijk = (i, k)
         ijk_reconstruction_indexes = (0, 2)
       if ijkPlane == 'IJ':
         backgroundDrawArray = backgroundArray[i,:,:]
         labelDrawArray = labelArray[i,:,:]
-        original_ijk[0] = i - 1
         ijk = (j, k)
         ijk_reconstruction_indexes = (1,2)
     else:
         print("HOW DID YOU DO THAT??? WHAT DID YOU DO TO ACTIVATE VOLUME MODE???")
+        node.SetParameter("TraceAndSelect,errorMessage", str("Error: volume mode not supported."))
+        node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
         return
 
 
@@ -379,8 +392,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     location = ijk
 
-    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
-    # print(best_path)
+    best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
+                                                 optional_seeds)
     print("@@@Dead ends:", dead_ends)
     
     attempts = 0
@@ -390,27 +403,15 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         lo -= 25
         print("Lowering min tolerance to:", lo)
         node.SetParameter("LabelEffect,paintThresholdMin", str(lo))
-        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
+        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray,
+                                                     optional_seeds)
         print("@@@Dead ends:", dead_ends)
     
     if dead_ends < 0:
         print("@@@No path found? Weird.")
+        node.SetParameter("TraceAndSelect,errorMessage", str("Error: could not find any suitable path."))
+        node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
         return
-
-        
-    
-    """
-    if dead_ends > 150 or dead_ends < 0:
-        lo -= 25
-        print("Lowering min tolerance to:", lo)
-        # Too many dead ends! Let's try this again
-        #TODO: reflect change in tolerance spinbox
-        best_path, visited, dead_ends = gimme_a_path(ijk, 200, hi, lo, backgroundDrawArray)
-        # print(best_path)
-        print("@@@Dead ends:", dead_ends)
-        if dead_ends < 0:
-            return
-    """
         
     # Save state before doing anything
     self.undoRedo.saveState()
@@ -498,41 +499,69 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     # signal to slicer that the label needs to be updated
     ## CHANGE OFFSET
     print("@@@Offset:|%s|" % node.GetParameter("TraceAndSelect,offsetvalue"))
-    self.offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
     
-    if self.offset != 0:
+    self.offset = float(node.GetParameter("TraceAndSelect,offsetvalue"))
+    print("OFFSET SIGN: %s" % math.copysign(1, self.offset) )
+
+    if self.offset != 0:      
       layoutManager = slicer.app.layoutManager()
       widget = layoutManager.sliceWidget('Red')
       rednode = widget.sliceLogic().GetSliceNode()
       rednode.SetSliceOffset(rednode.GetSliceOffset() + math.copysign(1, self.offset))
-      node.SetParameter("TraceAndSelect,offsetvalue", str(self.offset - math.copysign(1, self.offset)))
+      node.SetParameter("TraceAndSelect,offsetvalue", str(self.offset -  math.copysign(1, self.offset)))
       print(self.offset)
       
       ### Calc centoid mean sutff here
 
-      rec_mean = (mean[0]/count, mean[1]/count)
-      print("MEAN:", rec_mean)
+      recs_mean = (mean[0]/count, mean[1]/count)
+      rec_mean = get_optional_seeds(best_path, recs_mean)[0]
+      print("MEAN:", rec_mean, recs_mean)
       rec_ijk = list(original_ijk)
+      for i in range(0,3):
+        rec_ijk[i] = int(rec_ijk[i] + int(math.copysign(1, self.offset)))
       rec_ijk[ijk_reconstruction_indexes[0]] = rec_mean[0]
       rec_ijk[ijk_reconstruction_indexes[1]] = rec_mean[1]
       print("RECURSIVE IJK:", rec_ijk)
       print("#########RECURSE#########")
-      return self.fill(rec_ijk)
+      return self.fill(rec_ijk, get_optional_seeds(best_path, recs_mean))
       
       ###
     
     print("@@@FILL DONE")
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
-    
+    node.SetParameter("TraceAndSelect,errorMessage", str("Fill complete. No errors detected."))
+    node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:Green}"))
     return
 
-def gimme_a_path(location, seed_distance, hi, lo, bgArray):
+import random
+  
+def get_optional_seeds(seeds, mid, a= 2, b=3):
+  optional_seeds = []
+  maxes = [0,0]
+  mins = [10000, 10000]
+  for i in seeds:
+    maxes[0] = max(i[0], maxes[0])
+    maxes[1] = max(i[1], maxes[1])
+    mins[0] = min(i[0], mins[0])
+    mins[1] = min(i[1], mins[1])
+    
+  optional_seeds.append( (int(mid[0] + a*mins[0])/b, int(mid[1]) ))
+  optional_seeds.append( ( int(mid[0]), int(mid[1] + a*mins[1])/b) )
+  optional_seeds.append( (int(mid[0] + a*maxes[0])/b  ,int(mid[1])) )
+  optional_seeds.append( (int(mid[0]), int(mid[1] + a*mins[1])/b) )
+
+  return optional_seeds
+  
+  
+def gimme_a_path(location, seed_distance, hi, lo, bgArray, optional_seeds=[]):
     """Finds the seeds, then builds the paths, then outputs the best path. No messy stuff required."""
     #
     # Find edge pixels
     #
     seeds = find_edges(location, seed_distance, hi, lo, bgArray)
-    
+    print("BEFORE", seeds)
+    seeds.extend(optional_seeds)
+    print("AFTER", seeds)
     #
     # Build paths
     #
@@ -541,6 +570,7 @@ def gimme_a_path(location, seed_distance, hi, lo, bgArray):
     for seed in seeds:
         if seed is None:
             continue
+        print("--- SEED ---",  str(seed))
         repeat = False
         for path in paths:
             if seed in path:
@@ -557,7 +587,39 @@ def gimme_a_path(location, seed_distance, hi, lo, bgArray):
     # Find best path
     #
     best_path = find_best_path(paths, location)
+    for edge in best_path[0]:
+        # Smooth the path
+        
     return best_path
+    
+
+def smooth_path(path_obj, hi, lo, bgArray):
+    """Smooth the path by adding extra pixels to visited."""
+    offsets = [
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
+        (-1, 0),
+        (-1, 1)
+    ]
+    num_pixels_added = 0
+    best_path, visited, dead_ends = path_obj
+    for pixel in best_path:
+        for offset in offsets:
+            neighbor = (pixel[0] + offset[0], pixel[1] + offset[1])
+            if neighbor in visisted or lo < bgArray[neighbor] < hi:
+                continue
+            distance = abs(bgArray[neighbor] - bgArray[pixel])
+            percentage = float(distance) / bgArray[pixel]
+            if percentage <= 0.2:
+                visited.append(neighbor)
+                num_pixels_added += 1
+    print("%d pixels were added during smoothing." %num_pixels_added)
+    return (best_path, visited, dead_ends)
+    
   
   ###
   ###
