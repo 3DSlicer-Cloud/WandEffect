@@ -40,30 +40,28 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
 
   def create(self):
     super(TraceAndSelectOptions,self).create()
-    
-    self.maxPixelsFrame = qt.QFrame(self.frame)
-    self.maxPixelsFrame.setLayout(qt.QHBoxLayout())
-    self.frame.layout().addWidget(self.maxPixelsFrame)
-    self.widgets.append(self.maxPixelsFrame)
-    self.maxPixelsLabel = qt.QLabel("Max Pixels per click:", self.maxPixelsFrame)
-    self.maxPixelsLabel.setToolTip("Set the maxPixels for each click")
-    self.maxPixelsFrame.layout().addWidget(self.maxPixelsLabel)
-    self.widgets.append(self.maxPixelsLabel)
-    self.maxPixelsSpinBox = qt.QDoubleSpinBox(self.maxPixelsFrame)
-    self.maxPixelsSpinBox.setToolTip("Set the maxPixels for each click")
-    self.maxPixelsSpinBox.minimum = 1
-    self.maxPixelsSpinBox.maximum = 100000
-    self.maxPixelsSpinBox.suffix = ""
-    self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
-    self.widgets.append(self.maxPixelsSpinBox)
-    
-    ## Preview checkbox
+
+        ## Preview checkbox
     self.preview = qt.QCheckBox("Preview outlines", self.frame)
     self.preview.setToolTip("Preview the outline of a selection with right-click.")
     self.frame.layout().addWidget(self.preview)
     ## End preview checkbox
 
-    ## For the offset value selection process
+
+
+    ## ERROR MESSAGE FRAME
+    self.errorMessageFrame = qt.QTextEdit(self.frame)
+    self.frame.layout().addWidget(self.errorMessageFrame)
+    #self.errorMessageFrame.setLayout(qt.QHBoxLayout)
+    self.errorMessageFrame.setFixedWidth(280)
+    self.errorMessageFrame.setReadOnly(True)
+    self.errorMessageFrame.setText('No Error Detected')
+    self.errorMessageFrame.setStyleSheet("QTextEdit {color:green}")
+    self.widgets.append(self.errorMessageFrame)
+    ## END ERROR MESSAGE FRAME
+
+
+        ## For the offset value selection process
     self.offsetvalueFrame = qt.QFrame(self.frame)
     self.offsetvalueFrame.setLayout(qt.QHBoxLayout())
     self.frame.layout().addWidget(self.offsetvalueFrame)
@@ -81,16 +79,23 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.widgets.append(self.offsetvalueSpinBox)
     ## End offset value selection
  
-    ## ERROR MESSAGE FRAME
-    self.errorMessageFrame = qt.QTextEdit(self.frame)
-    self.frame.layout().addWidget(self.errorMessageFrame)
-    #self.errorMessageFrame.setLayout(qt.QHBoxLayout)
-    self.errorMessageFrame.setFixedWidth(280)
-    self.errorMessageFrame.setReadOnly(True)
-    self.errorMessageFrame.setText('No Error Detected')
-    self.errorMessageFrame.setStyleSheet("QTextEdit {color:green}")
-    self.widgets.append(self.errorMessageFrame)
-    ## END ERROR MESSAGE FRAME
+    
+    self.maxPixelsFrame = qt.QFrame(self.frame)
+    self.maxPixelsFrame.setLayout(qt.QHBoxLayout())
+    self.frame.layout().addWidget(self.maxPixelsFrame)
+    self.widgets.append(self.maxPixelsFrame)
+    self.maxPixelsLabel = qt.QLabel("Max Pixels per click:", self.maxPixelsFrame)
+    self.maxPixelsLabel.setToolTip("Set the maxPixels for each click")
+    self.maxPixelsFrame.layout().addWidget(self.maxPixelsLabel)
+    self.widgets.append(self.maxPixelsLabel)
+    self.maxPixelsSpinBox = qt.QDoubleSpinBox(self.maxPixelsFrame)
+    self.maxPixelsSpinBox.setToolTip("Set the maxPixels for each click")
+    self.maxPixelsSpinBox.minimum = 1
+    self.maxPixelsSpinBox.maximum = 100000
+    self.maxPixelsSpinBox.suffix = ""
+    self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
+    self.widgets.append(self.maxPixelsSpinBox)
+    
     
     HelpButton(self.frame, "Use this tool to help you label all voxels enclosed in an area bounded by the the largest path of pixels within the specified threshold.")
 
