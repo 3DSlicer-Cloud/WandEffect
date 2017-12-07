@@ -31,8 +31,8 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.attributes = ('MouseTool')
     self.displayName = 'TraceAndSelect Effect'
     self.offset = 0
-    # self.usesThreshold = True
     self.usesPaintOver = False
+    self.usesThreshold = False
 
 
   def __del__(self):
@@ -40,8 +40,23 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
 
   def create(self):
     super(TraceAndSelectOptions,self).create()
+    
+    ## Custom threshold box
+    # Note: This is needed because other tools can disable, hide, or manipulate the default threshold box
+    # We need one unique to our tool
+    self.threshLabel = qt.QLabel("Threshold", self.frame)
+    self.threshLabel.setToolTip("In threshold mode, the label will only be set if the background value is within this range.")
+    self.frame.layout().addWidget(self.threshLabel)
+    self.widgets.append(self.threshLabel)
+    self.thresh = ctk.ctkRangeWidget(self.frame)
+    self.thresh.spinBoxAlignment = 0xff # put enties on top
+    self.thresh.singleStep = 0.01
+    self.setRangeWidgetToBackgroundRange(self.thresh)
+    self.frame.layout().addWidget(self.thresh)
+    self.widgets.append(self.thresh)
+    ## End custom threshold box
 
-        ## Preview checkbox
+    ## Preview checkbox
     self.preview = qt.QCheckBox("Preview outlines", self.frame)
     self.preview.setToolTip("Preview the outline of a selection with right-click.")
     self.frame.layout().addWidget(self.preview)
@@ -116,7 +131,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     # disabled while the gui is being updated.  This allows several gui
     # elements to be interlinked with signal/slots but still get updated
     # as a unit to the new value of the mrml node.
-    self.thresholdPaint.hide()
+    # self.thresholdPaint.hide()
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
     self.connections.append( (self.preview, "clicked()", self.onPreviewChanged ) )
@@ -126,6 +141,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
 
     self.connections.append( 
       (self.offsetvalueSpinBox, 'valueChanged(double)', self.onOffsetValueSpinBoxChanged) )
+    self.connections.append( (self.thresh, "valuesChanged(double,double)", self.onThreshValuesChange ) )
 
 
     # Add vertical spacer
@@ -153,6 +169,8 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       ("maxPixels", "25000"),
       ("offsetvalue", '0'),
       ("preview", "0"),
+      ("paintThresholdMin", "250"),
+      ("paintThresholdMax", "2799"),
     )
     for d in defaults:
       param = "TraceAndSelect,"+d[0]
@@ -161,9 +179,6 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
         self.parameterNode.SetParameter(param, d[1])
     defaults = (
       ("paintOver", "1"),
-      ("paintThreshold", "1"),
-      ("paintThresholdMin", "250"),
-      ("paintThresholdMax", "2799"),
     )
     for d in defaults:
       param = "LabelEffect,"+d[0]
@@ -173,13 +188,17 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.parameterNode.SetDisableModifiedEvent(disableState)
     
   def updateGUIFromMRML(self,caller,event):
-    params = ("maxPixels",)
+    params = ("maxPixels", "paintThresholdMin", "paintThresholdMax")
     for p in params:
       if self.parameterNode.GetParameter("TraceAndSelect,"+p) == '':
         # don't update if the parameter node has not got all values yet
         return
     super(TraceAndSelectOptions,self).updateGUIFromMRML(caller,event)
     self.disconnectWidgets()
+    self.thresh.setMinimumValue(
+                float(self.parameterNode.GetParameter("TraceAndSelect,paintThresholdMin")) )
+    self.thresh.setMaximumValue(
+                float(self.parameterNode.GetParameter("TraceAndSelect,paintThresholdMax")) )
     self.errorMessageFrame.setText(str(self.parameterNode.GetParameter("TraceAndSelect,errorMessage")))
     self.errorMessageFrame.setStyleSheet("QTextEdit {color:blue}")
     self.errorMessageFrame.setStyleSheet(self.parameterNode.GetParameter("TraceAndSelect,errorMessageColor"))
@@ -213,11 +232,22 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
   def onTissueButtonChanged(self):
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","-2500")
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
-    self.threshold.setValues(-250, 2799)
+    self.thresh.setValues(-250, 2799)
   def onBoneButtonChanged(self):
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","250")
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
-    self.threshold.setValues(250, 2799)
+    self.thresh.setValues(250, 2799)
+  def onThreshValuesChange(self,min,max):
+    self.updateMRMLFromGUI()
+  """
+  def onThresholdValuesChange(self,min,max):
+    print("Threshold changed")
+    self.disconnectWidgets()
+    self.tissueRadioButton.setChecked(False)
+    self.boneRadioButton.setChecked(False)
+    self.connectWidgets()
+    self.updateMRMLFromGUI()
+  """
   def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
@@ -226,6 +256,10 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
         self.parameterNode.SetParameter( "TraceAndSelect,preview", "1" )
     else:
         self.parameterNode.SetParameter( "TraceAndSelect,preview", "0" )
+    self.parameterNode.SetParameter(
+                "TraceAndSelect,paintThresholdMin", str(self.thresh.minimumValue) )
+    self.parameterNode.SetParameter(
+                "TraceAndSelect,paintThresholdMax", str(self.thresh.maximumValue) )
     self.parameterNode.SetParameter( "TraceAndSelect,maxPixels", str(self.maxPixelsSpinBox.value) )
     self.parameterNode.SetParameter( "TraceAndSelect,offsetvalue", str(self.offsetvalueSpinBox.value) )
     self.parameterNode.SetDisableModifiedEvent(disableState)
@@ -311,6 +345,10 @@ class TraceAndSelectTool(LabelEffect.LabelEffectTool):
             self.prevPath = []
             self.prevFillPoint = None
             self.undoRedo.undo()
+            sliceLogic = self.sliceWidget.sliceLogic()
+            logic = TraceAndSelectLogic(sliceLogic)
+            logic.setErrorMessage("Previewed path was discarded.", 1)
+
     else:
       pass
 
@@ -418,17 +456,13 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("@@@MaxPixels:%s" % node.GetParameter("TraceAndSelect,maxPixels"))
     maxPixels = float(node.GetParameter("TraceAndSelect,maxPixels"))
     
-    # Whether or not threshold is enabled (should always be 1, since the option to disable was removed from GUI)
-    print("@@@Theshold:%s" % node.GetParameter("LabelEffect,paintThreshold"))
-    paintThreshold = int(node.GetParameter("LabelEffect,paintThreshold"))
-    
     # Minimum intensity value to be detected
-    print("@@@Theshold Min:%s" % node.GetParameter("LabelEffect,paintThresholdMin"))
-    thresholdMin = float(node.GetParameter("LabelEffect,paintThresholdMin"))
+    print("@@@Theshold Min:%s" % node.GetParameter("TraceAndSelect,paintThresholdMin"))
+    thresholdMin = float(node.GetParameter("TraceAndSelect,paintThresholdMin"))
     
     # Maximum intensity value to be detected
-    print("@@@Theshold Max:%s" % node.GetParameter("LabelEffect,paintThresholdMax"))
-    thresholdMax = float(node.GetParameter("LabelEffect,paintThresholdMax"))
+    print("@@@Theshold Max:%s" % node.GetParameter("TraceAndSelect,paintThresholdMax"))
+    thresholdMax = float(node.GetParameter("TraceAndSelect,paintThresholdMax"))
   
     
     labelLogic = self.sliceLogic.GetLabelLayer()
@@ -526,6 +560,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
 
         if mode == 1:  # Outline only mode
             print("Outline made, returning.")
+            self.setErrorMessage("Preview complete. No errrors detected.\nLeft click to confirm.\nRight click to try a new outline.\nUndo to remove.", 1)
             return (best_path, ijk)
         
     
@@ -549,8 +584,8 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       location = toVisit.pop(0)
 
       try:
-        l = labelDrawArray[location]
-        b = backgroundDrawArray[location]
+        l = fetch_val(labelDrawArray, location)
+        b = fetch_val(backgroundDrawArray, location)
       except IndexError:
         continue
       if (not paintOver and l != 0):
@@ -742,9 +777,14 @@ def smooth_path(path_obj, hi, lo, bgArray):
     for pixel in best_path:
         for offset in offsets:
             neighbor = (pixel[0] + offset[0], pixel[1] + offset[1])
-            if len(bgArray) < neighbor:
-              continue
-            if neighbor in visited or lo < bgArray[neighbor] < hi:
+            p_intensity = None
+            n_intensity = None
+            try:
+                p_intensity = fetch_val(bgArray, pixel)
+                n_intensity = fetch_val(bgArray, neighbor)
+            except IndexError:
+                continue
+            if neighbor in visited or lo < n_intensity < hi:
                 continue
             """
             distance = abs(bgArray[neighbor] - bgArray[pixel])
@@ -753,11 +793,11 @@ def smooth_path(path_obj, hi, lo, bgArray):
                 visited.append(neighbor)
                 num_pixels_added += 1
             """
-            # distance = abs(bgArray[neighbor] - bgArray[pixel])
+            proximity = abs(n_intensity - p_intensity)
             if bgArray[neighbor] > hi:
                 distance = bgArray[neighbor] - hi
             else:
-                distance = lo - bgArray[neighbor]
+                distance = lo - n_intensity
             if distance <= 125:
                 visited.append(neighbor)
                 num_pixels_added += 1
@@ -789,7 +829,7 @@ def find_edges(starting_point, max_dist, hi, lo, bgArray):
     If starting_point is NOT within threshold, try to find as many as 8 points; two for each offset.
     """
     try:
-        b = bgArray[starting_point]
+        b = fetch_val(bgArray, starting_point)
     except IndexError:
         return None
     offsets = [(0,1), (1,0), (0,-1), (-1,0)]
@@ -880,7 +920,7 @@ def is_edge(location, hi, lo, bgArray):
     ]
     # Check that location is within threshold first
     try:
-        b = bgArray[location]
+        b = fetch_val(bgArray, location)
     except IndexError:
         return False
     if b < lo or b > hi:
@@ -890,63 +930,18 @@ def is_edge(location, hi, lo, bgArray):
     for offset in offsets:
         tmp = (location[0] + offset[0], location[1] + offset[1])
         try:
-            b = bgArray[tmp]
+            b = fetch_val(bgArray, tmp)
         except IndexError:
             return True
         if b < lo or b > hi:
             return True
     return False
 
+def fetch_val(array, coordinate):
+    if coordinate[0] < 0 or coordinate[1] < 0:
+        raise IndexError
+    return array[coordinate]
 
-def is_inside_path(location, path):
-    """Return true if location is inside path."""
-    # Check that location is not in path
-    if location in path:
-        return False
-    # Check the number of edge points between the point and each edge of the DICOM
-    # Multiple checks necessary to avoid edge cases where an edge of the path may be parallel to an axis
-    # Ex:
-    """
-     #######
-    #      #E
-    ##  P   #
-      ######
-    """
-    # If the number of intersections from negative x-axis were counted, P would be considered outside the path.
-    # TODO:
-    # EDGE CASE: E IS CONSIDERED INSIDE THE SHAPE
-    # Modify so that the function checks all 4 axes, and only proceeds if the number of intersections is correct for ALL of them.
-    # Will have to make it so it doesn't simply sum intersection points, but will have to ignore series of contiguous points and count them as a single intersection.
-    intersections = sum(x[0] == location[0] and x[1] < location[1] for x in path)
-    if (intersections % 2) == 1:
-        return True
-    intersections = sum(x[0] == location[0] and x[1] > location[1] for x in path)
-    if (intersections % 2) == 1:
-        return True
-    intersections = sum(x[1] == location[1] and x[0] < location[0] for x in path)
-    if (intersections % 2) == 1:
-        return True
-    intersections = sum(x[1] == location[1] and x[0] > location[0] for x in path)
-    if (intersections % 2) == 1:
-        return True
-    return False
-
-
-def get_point_inside_path(path):
-    """Return a point inside the path."""
-    point = path[0]
-    offsets = [
-        (0,1),
-        (1,0),
-        (0,-1),
-        (-1,0)
-    ]
-    for offset in offsets:
-        tmp = (point[0] + offset[0], point[1] + offset[1])
-        if is_inside_path(tmp, path):
-            return tmp
-    print("@@@There are no adjacent points inside the path???")
-    return None
 
 #
 # The TraceAndSelect class definition
