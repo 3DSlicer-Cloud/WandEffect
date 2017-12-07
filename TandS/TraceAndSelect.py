@@ -47,8 +47,20 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.frame.layout().addWidget(self.preview)
     ## End preview checkbox
 
-
-
+    self.modeButtons = qt.QButtonGroup(self.frame)
+    self.tissueRadioButton = qt.QRadioButton("Tissue Mode", self.frame)
+    self.boneRadioButton = qt.QRadioButton("Bone/Nerve Mode", self.frame)
+    self.hbox = qt.QHBoxLayout()
+    self.hbox.addWidget(self.boneRadioButton)
+    self.hbox.addWidget(self.tissueRadioButton)
+    self.frame.layout().addLayout(self.hbox)
+    self.modeButtons.addButton(self.boneRadioButton)
+    self.modeButtons.addButton(self.tissueRadioButton)
+    
+    self.widgets.append(self.tissueRadioButton)
+    self.widgets.append(self.boneRadioButton)    
+  
+    
     ## ERROR MESSAGE FRAME
     self.errorMessageFrame = qt.QTextEdit(self.frame)
     self.frame.layout().addWidget(self.errorMessageFrame)
@@ -59,7 +71,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.errorMessageFrame.setStyleSheet("QTextEdit {color:green}")
     self.widgets.append(self.errorMessageFrame)
     ## END ERROR MESSAGE FRAME
-
+    
 
         ## For the offset value selection process
     self.offsetvalueFrame = qt.QFrame(self.frame)
@@ -108,6 +120,10 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.connections.append( 
         (self.maxPixelsSpinBox, 'valueChanged(double)', self.onMaxPixelsSpinBoxChanged) )
     self.connections.append( (self.preview, "clicked()", self.onPreviewChanged ) )
+
+    self.connections.append( (self.tissueRadioButton, "clicked()", self.onTissueButtonChanged ) )
+    self.connections.append( (self.boneRadioButton, "clicked()", self.onBoneButtonChanged ) )
+
     self.connections.append( 
       (self.offsetvalueSpinBox, 'valueChanged(double)', self.onOffsetValueSpinBoxChanged) )
 
@@ -155,7 +171,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
       if pvalue == '':
          self.parameterNode.SetParameter(param, d[1])
     self.parameterNode.SetDisableModifiedEvent(disableState)
-
+    
   def updateGUIFromMRML(self,caller,event):
     params = ("maxPixels",)
     for p in params:
@@ -188,11 +204,20 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.updateMRMLFromGUI()
 
   def onPreviewChanged(self):
+    #self.tissueRadioButton.setChecked(0)
+    #self.boneRadioButton.click()
     if self.updatingGUI:
       return
     self.updateMRMLFromGUI()
 
-    
+  def onTissueButtonChanged(self):
+    self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","-2500")
+    self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
+    self.threshold.setValues(-250, 2799)
+  def onBoneButtonChanged(self):
+    self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","250")
+    self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
+    self.threshold.setValues(250, 2799)
   def updateMRMLFromGUI(self):
     disableState = self.parameterNode.GetDisableModifiedEvent()
     self.parameterNode.SetDisableModifiedEvent(1)
@@ -206,7 +231,6 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.parameterNode.SetDisableModifiedEvent(disableState)
     if not disableState:
       self.parameterNode.InvokePendingModifiedEvent()
-
 
 #
 # TraceAndSelectTool
@@ -317,7 +341,6 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     self.fillMode = 'Plane'
 
 
-
   ###
   ###
   ## START HERE ##########
@@ -328,7 +351,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
   ## START HERE ##########
   ##
   ###
-
+  
   def apply(self,xy, mode=0, forced_path=None, forced_point=None):
     #
     # get the parameters from MRML
@@ -447,8 +470,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         ijk_reconstruction_indexes = (1,2)
     else:
         print("HOW DID YOU DO THAT??? WHAT DID YOU DO TO ACTIVATE VOLUME MODE???")
-        node.SetParameter("TraceAndSelect,errorMessage", str("Error: volume mode not supported."))
-        node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
+        self.setErrorMessage("Error: volume mode not supported.")
         return
 
 
@@ -492,8 +514,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         
         if dead_ends < 0:
             print("@@@No path found? Weird.")
-            node.SetParameter("TraceAndSelect,errorMessage", str("Error: could not find any suitable path."))
-            node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:red}"))
+            self.setErrorMessage("Error: could not find any suitable path.")
             return
         
         # Save state before doing anything
@@ -560,6 +581,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
       if not (extrema[0] < location[0] < extrema[1] and extrema[2] < location[1] < extrema[3]):
         # Went out of bounds for path
         print("@@@WENT OUT OF BOUNDS FOR PATH!")
+        self.setErrorMessage("Error: Went out of bounds for path.")
         self.undoRedo.undo()
         return
       labelDrawArray[location] = label
@@ -583,6 +605,7 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     print("OFFSET SIGN: %s" % math.copysign(1, self.offset) )
 
     if self.offset != 0:
+      slices_seen = self.progress.maximum - abs(self.offset)
       if self.progress.wasCanceled:
         self.offset = 0
         layoutManager = slicer.app.layoutManager()
@@ -591,8 +614,9 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
         rednode.SetSliceOffset(rednode.GetSliceOffset() + math.copysign(1, self.offset))
         node.SetParameter("TraceAndSelect,offsetvalue",
                           str(0))
+        self.setErrorMessage("Fill abandoned after {} slice(s)".format(int(slices_seen)),1)
         return
-      self.progress.setValue(self.progress.maximum - abs(self.offset))
+      self.progress.setValue(slices_seen)
       layoutManager = slicer.app.layoutManager()
       widget = layoutManager.sliceWidget('Red')
       rednode = widget.sliceLogic().GetSliceNode()
@@ -618,10 +642,30 @@ class TraceAndSelectLogic(LabelEffect.LabelEffectLogic):
     
     print("@@@FILL DONE")
     EditUtil.EditUtil().markVolumeNodeAsModified(labelNode)
-    node.SetParameter("TraceAndSelect,errorMessage", str("Fill complete. No errors detected."))
-    node.SetParameter("TraceAndSelect,errorMessageColor", str("QTextEdit {color:Green}"))
-    return
+    self.setErrorMessage("Fill complete. No errors detected.", 1)
 
+    return
+  
+  def setErrorMessage(self, errorText, errorColor = 0):
+    """Call this to seet the message in the error box.
+        Parameters: 
+          errorText: string to be displayed in the box 
+          errorColor: int 1 or 0 (DEFAULT IS 0) that sets the color of the text as either green (1) or red (0)
+        Returns: none"""
+
+    if (errorColor == 1):
+      errorColor = "QTextEdit {color:Green}"
+    elif (errorColor == 0):
+      errorColor = "QTextEdit {color:red}"
+    else:
+      # Why did you do this? Read the function? I'm going to make the text white to punish you
+      errorColor = "QTextEdit {color:white}"
+      
+    node = EditUtil.EditUtil().getParameterNode()
+    node.SetParameter("TraceAndSelect,errorMessage", str(errorText))
+    node.SetParameter("TraceAndSelect,errorMessageColor", str(errorColor))
+    return
+  
 import random
   
 def get_optional_seeds(seeds, mid, a= 2, b=3):
@@ -698,6 +742,8 @@ def smooth_path(path_obj, hi, lo, bgArray):
     for pixel in best_path:
         for offset in offsets:
             neighbor = (pixel[0] + offset[0], pixel[1] + offset[1])
+            if len(bgArray) < neighbor:
+              continue
             if neighbor in visited or lo < bgArray[neighbor] < hi:
                 continue
             """
@@ -929,6 +975,10 @@ pet = EditorLib.TraceAndSelectTool(sw)
 
 """
 
+
+
+
+
 #
 # TraceAndSelect
 #
@@ -987,3 +1037,4 @@ class TraceAndSelectWidget:
     pass
 
 # Steven wuz here
+# Nathan wuz here 2
