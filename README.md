@@ -12,3 +12,6 @@ To test the extension, follow the instructions for:
 * [Bone and nerve selection](https://www.youtube.com/watch?v=qJFSeH6n0QE).
 * [Multi-slice support](https://www.youtube.com/watch?v=DYjxMnqFd-Y).
 * [Full-limb support](https://www.youtube.com/watch?v=RRTbvi0riAI).
+* [A new UI](https://youtu.be/TSEpF9ZIL9Q?t=9s).
+* [Outline preview](https://youtu.be/TSEpF9ZIL9Q?t=26s).
+* [Status bar](https://youtu.be/TSEpF9ZIL9Q?t=1m15s).
