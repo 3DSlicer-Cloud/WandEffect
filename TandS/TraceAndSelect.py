@@ -62,6 +62,10 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.frame.layout().addWidget(self.preview)
     ## End preview checkbox
 
+
+
+
+    
     self.modeButtons = qt.QButtonGroup(self.frame)
     self.tissueRadioButton = qt.QRadioButton("Tissue Mode", self.frame)
     self.boneRadioButton = qt.QRadioButton("Bone/Nerve Mode", self.frame)
@@ -122,6 +126,13 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.maxPixelsSpinBox.suffix = ""
     self.maxPixelsFrame.layout().addWidget(self.maxPixelsSpinBox)
     self.widgets.append(self.maxPixelsSpinBox)
+
+
+    # Help Browser
+    self.helpBrowser = qt.QPushButton("Help")
+    
+    # End Help Browser
+    self.frame.layout().addWidget(self.helpBrowser)
     
     
     HelpButton(self.frame, "Use this tool to help you label all voxels enclosed in an area bounded by the the largest path of pixels within the specified threshold.")
@@ -142,6 +153,9 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.connections.append( 
       (self.offsetvalueSpinBox, 'valueChanged(double)', self.onOffsetValueSpinBoxChanged) )
     self.connections.append( (self.thresh, "valuesChanged(double,double)", self.onThreshValuesChange ) )
+
+    self.connections.append((self.helpBrowser, "clicked()", self.onHelpBrowserPressed))
+    
 
 
     # Add vertical spacer
@@ -223,20 +237,24 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
     self.updateMRMLFromGUI()
 
   def onPreviewChanged(self):
-    #self.tissueRadioButton.setChecked(0)
-    #self.boneRadioButton.click()
     if self.updatingGUI:
       return
     self.updateMRMLFromGUI()
 
+  def onHelpBrowserPressed(self):
+    qt.QDesktopServices.openUrl(qt.QUrl("https://fastslice.github.io/"))
+                            
   def onTissueButtonChanged(self):
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","-2500")
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
     self.thresh.setValues(-250, 2799)
+    self.parameterNode.SetParameter("TraceAndSelect,maxPixels","99000")
   def onBoneButtonChanged(self):
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMin","250")
     self.parameterNode.SetParameter("TraceAndSelect,paintThresholdMax","2799")
     self.thresh.setValues(250, 2799)
+    self.parameterNode.SetParameter("TraceAndSelect,maxPixels","25000")
+    #self.
   def onThreshValuesChange(self,min,max):
     self.updateMRMLFromGUI()
   """
