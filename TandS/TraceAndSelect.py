@@ -129,7 +129,7 @@ class TraceAndSelectOptions(EditorLib.LabelEffectOptions):
 
 
     # Help Browser
-    self.helpBrowser = qt.QPushButton("Help")
+    self.helpBrowser = qt.QPushButton("Visit the Webpage")
     
     # End Help Browser
     self.frame.layout().addWidget(self.helpBrowser)
